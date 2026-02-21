@@ -133,7 +133,7 @@ impl Global {
                     if self.cur_chr != OR_CODE {
                         break 'block; // Goto common_ending
                     }
-                    return Err(TeXError::ExtraOr);
+                    self.error(TeXError::ExtraOr)?;
                 }
                 if self.cur_chr == FI_CODE {
                     self.sec496_pop_the_condition_stack();
@@ -202,7 +202,9 @@ impl Global {
                     (self.cur_tok - OTHER_TOKEN) as u8
                 }
                 else {
-                    return Err(TeXError::MissingEqual(this_if));
+                    // Section 503: back_error puts the token back (shows as <to be read again>)
+                    self.back_error(TeXError::MissingEqual(this_if))?;
+                    b'='
                 };
 
                 match this_if {

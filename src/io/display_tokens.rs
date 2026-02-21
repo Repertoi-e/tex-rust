@@ -129,7 +129,7 @@ impl Global {
             
             SUB_MARK => chr_cmd!("subscript character "),
             
-            ENDV => chr_cmd!("end of alignment template"),
+            ENDV => self.print("end of alignment template"),
             
             SPACER => chr_cmd!("blank space "),
             
@@ -734,8 +734,10 @@ impl Global {
             // Section 1263
             SET_INTERACTION => {
                 match chr_code {
-                    ERROR_STOP_MODE => self.print_esc("errorstopmode"),
-                    _ => self.print_esc("batchmode"),
+                    BATCH_MODE => self.print_esc("batchmode"),
+                    NONSTOP_MODE => self.print_esc("nonstopmode"),
+                    SCROLL_MODE => self.print_esc("scrollmode"),
+                    _ => self.print_esc("errorstopmode"),
                 }
             },
             // End section 1263

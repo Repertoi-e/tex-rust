@@ -73,10 +73,10 @@ impl Global {
     // Section 694
     pub(crate) fn print_style(&mut self, c: Integer) {
         match c / 2 {
-            0 => self.print("displaystyle"),
-            1 => self.print("textstyle"),
-            2 => self.print("scriptstyle"),
-            3 => self.print("scriptscriptstyle"),
+            0 => self.print_esc("displaystyle"),
+            1 => self.print_esc("textstyle"),
+            2 => self.print_esc("scriptstyle"),
+            3 => self.print_esc("scriptscriptstyle"),
             _ => self.print("Unknown style!"),
         }
     }
@@ -119,7 +119,7 @@ impl Global {
                 self.print_esc("limits");
             }
             else {
-                self.print_esc("nomilits");
+                self.print_esc("nolimits");
             }
         }
         if r#type(p) < LEFT_NOAD {

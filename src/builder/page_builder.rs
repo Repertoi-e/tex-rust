@@ -2,12 +2,13 @@ use crate::arithmetic::{badness, x_over_n};
 use crate::constants::*;
 use crate::datastructures::{
     r#box, box_mut, count, depth, dimen, float_cost, geq_word_define, glue_ptr,
-    glue_ref_count_mut, height, height_mut, holding_inserts, info, info_mut,
-    ins_ptr, ins_ptr_mut, link, link_mut, list_ptr, mark_ptr, max_dead_cycles,
-    max_depth, output_routine, penalty, penalty_mut, shrink, shrink_order,
-    skip, split_top_ptr, split_top_skip, split_top_skip_mut, stretch,
-    stretch_order, subtype, subtype_mut, token_ref_count_mut, r#type, type_mut,
-    vbadness, vbadness_mut, vfuzz, vfuzz_mut, vsize, width, width_mut
+    glue_ptr_mut, glue_ref_count_mut, height, height_mut, holding_inserts, info,
+    info_mut, ins_ptr, ins_ptr_mut, link, link_mut, list_ptr, mark_ptr,
+    max_dead_cycles, max_depth, output_routine, penalty, penalty_mut, shrink,
+    shrink_order, shrink_order_mut, skip, split_top_ptr, split_top_skip,
+    split_top_skip_mut, stretch, stretch_order, subtype, subtype_mut,
+    token_ref_count_mut, r#type, type_mut, vbadness, vbadness_mut, vfuzz,
+    vfuzz_mut, vsize, width, width_mut
 };
 use crate::error::{TeXError, TeXResult};
 use crate::{
@@ -103,13 +104,13 @@ impl Global {
     }
 }
 
-// Section 993
-fn ensure_vbox(n: u8) -> TeXResult<()> {
-    let p = r#box(n as HalfWord);
-    if p != NULL && r#type(p) == HLIST_NODE {
-        Err(TeXError::InsertionCanOnlyBeAddedToVbox(n as HalfWord))
-    }
-    else {
+impl Global {
+    // Section 993
+    fn ensure_vbox(&mut self, n: u8) -> TeXResult<()> {
+        let p = r#box(n as HalfWord);
+        if p != NULL && r#type(p) == HLIST_NODE {
+            self.error(TeXError::InsertionCanOnlyBeAddedToVbox(n as HalfWord))?;
+        }
         Ok(())
     }
 }
@@ -253,7 +254,7 @@ impl Global {
                             r = q;
                             *subtype_mut(r) = n;
                             *type_mut(r) = INSERTING;
-                            ensure_vbox(n as u8)?;
+                            self.ensure_vbox(n as u8)?;
 
                             *height_mut(r) = if r#box(n as HalfWord) == NULL {
                                 0
@@ -276,7 +277,7 @@ impl Global {
                             self.page_so_far[2 + stretch_order(q) as usize] += stretch(q);
                             page_shrink!(self) += shrink(q);
                             if shrink_order(q) != NORMAL && shrink(q) != 0 {
-                                return Err(TeXError::InfiniteGlueShrinkageInsertedFrom(n as Integer));
+                                self.error(TeXError::InfiniteGlueShrinkageInsertedFrom(n as Integer))?;
                             }
                             // End section 1009
                         }
@@ -473,9 +474,14 @@ impl Global {
                         self.page_so_far[2 + stretch_order(q) as usize] += stretch(q);
                         page_shrink!(self) += shrink(q);
                         if shrink_order(q) != NORMAL && shrink(q) != 0 {
-                            return Err(TeXError::InfiniteGlueShrinkageOnCurrentPage);
+                            self.error(TeXError::InfiniteGlueShrinkageOnCurrentPage)?;
+                            let r = self.new_spec(q)?;
+                            *shrink_order_mut(r) = NORMAL;
+                            self.delete_glue_ref(q);
+                            *glue_ptr_mut(p) = r;
+                            // q is now r for subsequent use
                         }
-                        q
+                        glue_ptr(p)
                     }
                 };
 
@@ -568,7 +574,7 @@ impl Global {
 
         // Section 1015
         if r#box(255) != NULL {
-            return Err(TeXError::Box255IsNotVoid);
+            self.error(TeXError::Box255IsNotVoid)?;
         }
         // End section 1015
 
@@ -580,7 +586,7 @@ impl Global {
             while r != PAGE_INS_HEAD {
                 if best_ins_ptr(r) != NULL {
                     let n = subtype(r);
-                    ensure_vbox(n as u8)?;
+                    self.ensure_vbox(n as u8)?;
                     if r#box(n as HalfWord) == NULL {
                         *box_mut(n as HalfWord) = self.new_null_box()?;
                     }
@@ -742,7 +748,7 @@ impl Global {
 
         if output_routine() != NULL {
             if self.dead_cycles >= max_dead_cycles() {
-                return Err(TeXError::OutputLoop);
+                self.error(TeXError::OutputLoop)?;
             }
             else {
                 // Section 1025

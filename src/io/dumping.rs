@@ -674,12 +674,7 @@ impl Global {
             // End section 1325
 
             // Section 1327
-            // Interaction is restricted to BATCH_MODE and ERROR_STOP_MODE only.
-            // If NONSTOP_MODE or SCROLL_MODE are met, it falls back to BATCH_MODE.
-            self.interaction = match undump!(0, 3) {
-                ERROR_STOP_MODE => ERROR_STOP_MODE,
-                _ => BATCH_MODE,
-            };
+            self.interaction = undump!(0, 3);
             self.format_ident = undump!(0, str_ptr() as Integer) as usize;
             undump_int!() != 69069
             // End section 1327

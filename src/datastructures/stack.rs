@@ -351,7 +351,7 @@ impl Global {
     }
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, PartialOrd, Clone, Copy)]
 pub(crate) enum Status {
     Normal,
     Skipping,
@@ -533,10 +533,6 @@ impl Global {
         *self.loc_mut() = p;
         Ok(())
     }
-
-    // Section 327
-    // No `back_error` or `ins_error`.
-    // When an error occurs, it's endgame.
 
     // Section 328
     pub(crate) fn begin_file_reading(&mut self) -> TeXResult<()> {

@@ -80,7 +80,10 @@ impl Global {
         self.cur_c = character(a);
         self.cur_f = fam_fnt((fam(a) + self.cur_size) as HalfWord) as QuarterWord;
         if self.cur_f == (NULL_FONT as QuarterWord) {
-            return Err(TeXError::UndefinedCharacter(a));
+            self.error(TeXError::UndefinedCharacter(a))?;
+            self.cur_i = self.null_character;
+            *math_type_mut(a) = EMPTY;
+            return Ok(());
         }
         self.cur_i = if self.cur_c >= (self.font_bc[self.cur_f as usize] as QuarterWord)
             && self.cur_c <= (self.font_ec[self.cur_f as usize] as QuarterWord)

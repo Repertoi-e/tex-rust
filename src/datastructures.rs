@@ -25,7 +25,7 @@ pub(crate) use equivalent::{
     vbadness, vbadness_mut, vfuzz_mut, vfuzz, max_dead_cycles, output_routine,
     max_depth, dimen, null_delimiter_space, tracing_macros,
     mu_skip, mag, every_cr, overfull_rule, overfull_rule_mut,
-    left_skip, right_skip, pretolerance, tolerance,
+    left_skip, left_skip_mut, right_skip, right_skip_mut, pretolerance, tolerance,
     emergency_stretch, adj_demerits, double_hyphen_demerits, final_hyphen_demerits,
     line_penalty, ex_hyphen_penalty, hyphen_penalty, inter_line_penalty,
     club_penalty, broken_penalty, lc_code, uc_hyph, script_space,

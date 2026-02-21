@@ -115,6 +115,10 @@ impl Global {
     pub(crate) fn input_ln(&mut self, selection: AlphaFileInSelector) -> TeXResult<bool> {
         self.buffer_string.clear();
 
+        // Section 31: "last:=first" is done before checking EOF.
+        // tex.web: "cf. Matthew 19:30" — the last shall be first.
+        self.last = self.first;
+
         match selection {
             AlphaFileInSelector::CurFile => {
                 let index = self.index() as usize;

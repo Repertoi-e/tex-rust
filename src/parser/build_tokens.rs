@@ -169,13 +169,16 @@ impl Global {
         let mut p = self.def_ref;
         let mut hash_brace = 0;
         let mut t = ZERO_TOKEN;
+        let mut goto_found = false;
         if macro_def {
-            self.sec474_scan_and_build_parameter_part(&mut p, &mut hash_brace, &mut t)?;
+            goto_found = self.sec474_scan_and_build_parameter_part(&mut p, &mut hash_brace, &mut t)?;
         }
         else {
             self.scan_left_brace()?;
         }
-        self.sec477_scan_and_build_body(&mut p, macro_def, xpand, t)?;
+        if !goto_found {
+            self.sec477_scan_and_build_body(&mut p, macro_def, xpand, t)?;
+        }
 
         // found:
         self.scanner_status = Status::Normal;
@@ -186,7 +189,8 @@ impl Global {
     }
 
     // Section 474
-    fn sec474_scan_and_build_parameter_part(&mut self, p: &mut HalfWord, hash_brace: &mut HalfWord, t: &mut HalfWord) -> TeXResult<()> {
+    // Returns Ok(true) to signal goto found (skip body scanning)
+    fn sec474_scan_and_build_parameter_part(&mut self, p: &mut HalfWord, hash_brace: &mut HalfWord, t: &mut HalfWord) -> TeXResult<bool> {
         loop {
             self.get_token()?;
             if self.cur_tok < RIGHT_BRACE_LIMIT {
@@ -200,15 +204,17 @@ impl Global {
                     *hash_brace = self.cur_tok;
                     self.store_new_token(p, self.cur_tok)?;
                     self.store_new_token(p, END_MATCH_TOKEN)?;
-                    return Ok(()); // Goto done
+                    return Ok(false); // Goto done
                 }
                 if *t == ZERO_TOKEN + 9 {
-                    return Err(TeXError::AlreadyNineParameters);
+                    self.error(TeXError::AlreadyNineParameters)?;
+                    continue; // tex.web: goto continue (skip store_new_token)
                 }
                 else {
                     *t += 1;
                     if self.cur_tok != *t {
-                        return Err(TeXError::ParametersNumberedConsecutively);
+                        self.back_error(TeXError::ParametersNumberedConsecutively)?;
+                        self.cur_tok = *t;
                     }
                     self.cur_tok = s;
                 }
@@ -220,10 +226,13 @@ impl Global {
         // done1:
         self.store_new_token(p, END_MATCH_TOKEN)?;
         if self.cur_cmd == RIGHT_BRACE {
-            Err(TeXError::MissingLeftBrace2)
+            // Section 475
+            self.align_state += 1;
+            self.error(TeXError::MissingLeftBrace2)?;
+            Ok(true) // goto found (skip body scanning)
         }
         else {
-            Ok(())
+            Ok(false)
         }
     }
 
@@ -269,6 +278,7 @@ impl Global {
             }
             else if self.cur_cmd == MAC_PARAM && macro_def {
                 // Section 479
+                let s = self.cur_tok; // tex.web: s:=cur_tok
                 if xpand {
                     self.get_x_token()?;
                 }
@@ -277,7 +287,8 @@ impl Global {
                 }
                 if self.cur_cmd != MAC_PARAM {
                     if self.cur_tok <= ZERO_TOKEN || self.cur_tok > t {
-                        return Err(TeXError::IllegalParameterNumber);
+                        self.back_error(TeXError::IllegalParameterNumber)?;
+                        self.cur_tok = s;
                     }
                     else {
                         self.cur_tok = OUT_PARAM_TOKEN - (b'0' as HalfWord) + self.cur_chr;
@@ -346,7 +357,8 @@ impl Global {
                         self.read_open[m as usize] = CLOSED;
                         if self.align_state != 1_000_000 {
                             self.runaway();
-                            return Err(TeXError::FileEndedWithin);
+                            self.align_state = 1_000_000;
+                            self.error(TeXError::FileEndedWithin)?;
                         }
                     }
                     // End section 486

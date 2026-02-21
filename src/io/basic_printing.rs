@@ -307,7 +307,7 @@ impl Global {
     pub fn sec75_initialize_print_selector(&mut self) {
         self.selector = match self.interaction {
             BATCH_MODE => NO_PRINT,
-            _ => TERM_ONLY,
+            _ => TERM_ONLY, // NONSTOP_MODE, SCROLL_MODE, ERROR_STOP_MODE
         };
     }
 
@@ -341,7 +341,7 @@ impl Global {
         self.print_char(b' ');
         self.print_scaled(w.sc());
         self.print_char(b' ');
-        self.print_scaled((w.gr()*(UNITY as Real)).round() as Scaled);
+        self.print_scaled(((w.gr() as Real)*(UNITY as Real)).round() as Scaled);
         self.print_ln();
         self.print_int(w.hh_lh());
         self.print_char(b'=');

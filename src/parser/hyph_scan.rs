@@ -78,9 +78,9 @@ impl Global {
                         }
                         else {
                             if lc_code(self.cur_chr) == 0 {
-                                return Err(TeXError::NotALetter);
+                                self.error(TeXError::NotALetter)?;
                             }
-                            if n < 63 {
+                            else if n < 63 {
                                 n += 1;
                                 self.hc[n as usize] = lc_code(self.cur_chr) as QuarterWord;
                             }
@@ -164,7 +164,7 @@ impl Global {
                         break 'reswitch;
                     },
 
-                    _ => return Err(TeXError::ImproperHyphenation)
+                    _ => self.error(TeXError::ImproperHyphenation)?
                 }
             }
         }
@@ -449,7 +449,10 @@ impl Global {
             self.sec961_enter_all_of_the_patterns()
         }
         else {
-            Err(TeXError::TooLateForPatterns)
+            self.error(TeXError::TooLateForPatterns)?;
+            *link_mut(GARBAGE) = self.scan_toks(false, false)?;
+            self.flush_list(self.def_ref);
+            Ok(())
         }
     }
 
@@ -474,7 +477,7 @@ impl Global {
                         else {
                             self.cur_chr = lc_code(self.cur_chr);
                             if self.cur_chr == 0 {
-                                return Err(TeXError::Nonletter);
+                                self.error(TeXError::Nonletter)?;
                             }
                         }
                         if k < 63 {
@@ -552,7 +555,7 @@ impl Global {
                             q = p;
                         }
                         if self.trie_o[q] != MIN_QUARTERWORD {
-                            return Err(TeXError::DuplicatePattern);
+                            self.error(TeXError::DuplicatePattern)?;
                         }
                         self.trie_o[q] = v;
                         // End section 963
@@ -565,7 +568,7 @@ impl Global {
                     digit_sensed = false;
                 },
 
-                _ => return Err(TeXError::BadPatterns)
+                _ => self.error(TeXError::BadPatterns)?
             }
         }
         // done:

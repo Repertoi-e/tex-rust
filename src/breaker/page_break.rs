@@ -1,9 +1,10 @@
 use crate::arithmetic::badness;
 use crate::constants::*;
 use crate::datastructures::{
-    box_mut, depth, glue_ptr, height, link, link_mut, list_ptr, list_ptr_mut,
-    mark_ptr, penalty, r#box, r#type, shrink, shrink_order, split_max_depth,
-    stretch, stretch_order, token_ref_count_mut, width, width_mut
+    box_mut, depth, glue_ptr, glue_ptr_mut, height, link, link_mut, list_ptr,
+    list_ptr_mut, mark_ptr, penalty, r#box, r#type, shrink, shrink_order,
+    shrink_order_mut, split_max_depth, stretch, stretch_order,
+    token_ref_count_mut, width, width_mut
 };
 use crate::error::{TeXError, TeXResult};
 use crate::{
@@ -211,9 +212,13 @@ impl Global {
                         active_height![2 + stretch_order(q) as usize] += stretch(q);
                         active_height![6] += shrink(q);
                         if shrink_order(q) != NORMAL && shrink(q) != 0 {
-                            return Err(TeXError::InfiniteGlueShrinkageInBoxBeingSplit);
+                            self.error(TeXError::InfiniteGlueShrinkageInBoxBeingSplit)?;
+                            let r = self.new_spec(q)?;
+                            *shrink_order_mut(r) = NORMAL;
+                            self.delete_glue_ref(q);
+                            *glue_ptr_mut(p) = r;
                         }
-                        q
+                        glue_ptr(p)
                     }
                 };
 
@@ -249,7 +254,8 @@ impl Global {
             return Ok(NULL);
         }
         if r#type(v) != VLIST_NODE {
-            return Err(TeXError::VsplitNeedsAVbox);
+            self.error(TeXError::VsplitNeedsAVbox)?;
+            return Ok(NULL);
         }
         // End section 978
 

@@ -203,7 +203,9 @@ pub(crate) fn glue_par_mut(p: HalfWord) -> &'static mut HalfWord {
 
 section_224_glue_par!(baseline_skip, BASELINE_SKIP_CODE);
 section_224_glue_par!(left_skip, LEFT_SKIP_CODE);
+section_224_glue_par_mut!(left_skip_mut, LEFT_SKIP_CODE);
 section_224_glue_par!(right_skip, RIGHT_SKIP_CODE);
+section_224_glue_par_mut!(right_skip_mut, RIGHT_SKIP_CODE);
 section_224_glue_par!(split_top_skip, SPLIT_TOP_SKIP_CODE);
 section_224_glue_par!(space_skip, SPACE_SKIP_CODE);
 section_224_glue_par!(xspace_skip, XSPACE_SKIP_CODE);

@@ -35,6 +35,16 @@ macro_rules! fam_in_range {
 }
 
 impl Global {
+    // Section 720
+    pub(crate) fn flush_math(&mut self) -> TeXResult<()> {
+        self.flush_node_list(link(self.head()))?;
+        self.flush_node_list(self.incomplete_noad())?;
+        *link_mut(self.head()) = NULL;
+        *self.tail_mut() = self.head();
+        *self.incomplete_noad_mut() = NULL;
+        Ok(())
+    }
+
     // Section 1136
     fn push_math(&mut self, c: Integer) -> TeXResult<()> {
         self.push_nest()?;
@@ -320,7 +330,8 @@ impl Global {
             Ok(())
         }
         else {
-            Err(TeXError::LimitControlsMustFollowMathOp)
+            self.error(TeXError::LimitControlsMustFollowMathOp)?;
+            Ok(())
         }
     }
 
@@ -340,7 +351,8 @@ impl Global {
             }
         }
         if self.cur_val < 0 {
-            return Err(TeXError::MissingDelimiterLeftParen)
+            self.back_error(TeXError::MissingDelimiterLeftParen)?;
+            self.cur_val = 0;
         }
         
         *small_fam_mut(p) = ((self.cur_val / 1_048_576) % 16) as QuarterWord;
@@ -365,7 +377,7 @@ impl Global {
     // Section 1165
     pub(crate) fn math_ac(&mut self) -> TeXResult<()> {
         if self.cur_cmd == ACCENT {
-            return Err(TeXError::UseMathAccentInMathMode);
+            self.error(TeXError::UseMathAccentInMathMode)?;
         }
         tail_append!(self, self.get_node(ACCENT_NOAD_SIZE)?);
         *type_mut(self.tail()) = ACCENT_NOAD;
@@ -429,10 +441,10 @@ impl Global {
             p = supscr!(self.tail()) + (self.cur_cmd as HalfWord) - (SUP_MARK as HalfWord);
             if t != EMPTY {
                 if self.cur_cmd == SUP_MARK {
-                    return Err(TeXError::DoubleSuperscript);
+                    self.error(TeXError::DoubleSuperscript)?;
                 }
                 else {
-                    return Err(TeXError::DoubleSubscript);
+                    self.error(TeXError::DoubleSubscript)?;
                 }
             }
             // End section 1177
@@ -444,7 +456,16 @@ impl Global {
     pub(crate) fn math_fraction(&mut self) -> TeXResult<()> {
         let c = self.cur_chr;
         if self.incomplete_noad() != NULL {
-            Err(TeXError::AmbiguousFraction)
+            // Section 1183: Ignore the fraction specification
+            if c >= DELIMITED_CODE {
+                self.scan_delimiter(GARBAGE, false)?;
+                self.scan_delimiter(GARBAGE, false)?;
+            }
+            if c % DELIMITED_CODE == ABOVE_CODE {
+                self.scan_dimen(false, false, false)?;
+            }
+            self.error(TeXError::AmbiguousFraction)?;
+            Ok(())
         }
         else {
             *self.incomplete_noad_mut() = self.get_node(FRACTION_NOAD_SIZE)?;
@@ -515,7 +536,9 @@ impl Global {
         if t == RIGHT_NOAD as HalfWord && self.cur_group != MATH_LEFT_GROUP {
             // Section 1192
             if self.cur_group == MATH_SHIFT_GROUP {
-                Err(TeXError::ExtraMathRight)
+                self.scan_delimiter(GARBAGE, false)?;
+                self.error(TeXError::ExtraMathRight)?;
+                Ok(())
             }
             else {
                 self.off_save()
@@ -550,14 +573,15 @@ impl Global {
             || self.font_params[fam_fnt(2 + SCRIPT_SIZE as HalfWord) as usize] < TOTAL_MATHSY_PARAMS
             || self.font_params[fam_fnt(2 + SCRIPT_SCRIPT_SIZE as HalfWord) as usize] < TOTAL_MATHSY_PARAMS
         {
-            return Err(TeXError::InsufficientSymbolFonts);
+            self.error(TeXError::InsufficientSymbolFonts)?;
+            self.flush_math()?;
         }
-
-        if self.font_params[fam_fnt(3 + TEXT_SIZE as HalfWord) as usize] < TOTAL_MATHEX_PARAMS
+        else if self.font_params[fam_fnt(3 + TEXT_SIZE as HalfWord) as usize] < TOTAL_MATHEX_PARAMS
             || self.font_params[fam_fnt(3 + SCRIPT_SIZE as HalfWord) as usize] < TOTAL_MATHEX_PARAMS
             || self.font_params[fam_fnt(3 + SCRIPT_SCRIPT_SIZE as HalfWord) as usize] < TOTAL_MATHEX_PARAMS
         {
-            return Err(TeXError::InsufficientExtensionFonts);
+            self.error(TeXError::InsufficientExtensionFonts)?;
+            self.flush_math()?;
         }
         // End section 1195
 
@@ -568,7 +592,7 @@ impl Global {
             // Section 1197
             self.get_x_token()?;
             if self.cur_cmd != MATH_SHIFT {
-                return Err(TeXError::DisplayMathEndsWithDollars);
+                self.back_error(TeXError::DisplayMathEndsWithDollars)?;
             }
             // End section 1197
 
@@ -588,13 +612,15 @@ impl Global {
                 || self.font_params[fam_fnt(2 + SCRIPT_SIZE as HalfWord) as usize] < TOTAL_MATHSY_PARAMS
                 || self.font_params[fam_fnt(2 + SCRIPT_SCRIPT_SIZE as HalfWord) as usize] < TOTAL_MATHSY_PARAMS
             {
-                return Err(TeXError::InsufficientSymbolFonts);
+                self.error(TeXError::InsufficientSymbolFonts)?;
+                self.flush_math()?;
             }
-            if self.font_params[fam_fnt(3 + TEXT_SIZE as HalfWord) as usize] < TOTAL_MATHEX_PARAMS
+            else if self.font_params[fam_fnt(3 + TEXT_SIZE as HalfWord) as usize] < TOTAL_MATHEX_PARAMS
                 || self.font_params[fam_fnt(3 + SCRIPT_SIZE as HalfWord) as usize] < TOTAL_MATHEX_PARAMS
                 || self.font_params[fam_fnt(3 + SCRIPT_SCRIPT_SIZE as HalfWord) as usize] < TOTAL_MATHEX_PARAMS
             {
-                return Err(TeXError::InsufficientExtensionFonts);
+                self.error(TeXError::InsufficientExtensionFonts)?;
+                self.flush_math()?;
             }
             // End section 1195
 
@@ -627,7 +653,7 @@ impl Global {
                 // Section 1197
                 self.get_x_token()?;
                 if self.cur_cmd != MATH_SHIFT {
-                    return Err(TeXError::DisplayMathEndsWithDollars);
+                    self.back_error(TeXError::DisplayMathEndsWithDollars)?;
                 }
                 // End section 1197
             }

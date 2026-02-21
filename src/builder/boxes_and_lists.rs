@@ -14,7 +14,7 @@ use crate::error::{TeXError, TeXResult};
 use crate::math::{math_type, math_type_mut};
 use crate::{
     Global, HalfWord, Integer, QuarterWord, Real, Scaled, SmallNumber,
-    add_glue_ref, contrib_tail, hpack, lig_char, nucleus,
+    add_glue_ref, contrib_tail, hpack, ins_list, lig_char, nucleus,
     sec404_get_next_nonblank_nonrelax_noncall_token, subscr, supscr,
     tail_append, vpack
 };
@@ -56,18 +56,43 @@ impl Global {
     // Section 1064
     pub(crate) fn off_save(&mut self) -> TeXResult<()> {
         if self.cur_group == BOTTOM_LEVEL {
-            Err(TeXError::Extra)
+            // Section 1066: Drop current token and complain
+            self.error(TeXError::Extra)?;
         }
         else {
             // Section 1065
+            self.back_input()?;
+            let p = self.get_avail()?;
+            *link_mut(TEMP_HEAD) = p;
+            self.print_nl("! ");
+            self.print("Missing ");
             match self.cur_group {
-                SEMI_SIMPLE_GROUP => Err(TeXError::MissingEndGroup),
-                MATH_SHIFT_GROUP => Err(TeXError::MissingDollar),
-                MATH_LEFT_GROUP => Err(TeXError::MissingMathRight),
-                _ => Err(TeXError::MissingRightBrace),
+                SEMI_SIMPLE_GROUP => {
+                    *info_mut(p) = CS_TOKEN_FLAG + FROZEN_END_GROUP;
+                    self.print_esc("endgroup");
+                },
+                MATH_SHIFT_GROUP => {
+                    *info_mut(p) = MATH_SHIFT_TOKEN + b'$' as HalfWord;
+                    self.print_char(b'$');
+                },
+                MATH_LEFT_GROUP => {
+                    *info_mut(p) = CS_TOKEN_FLAG + FROZEN_RIGHT;
+                    *link_mut(p) = self.get_avail()?;
+                    let p2 = link(p);
+                    *info_mut(p2) = OTHER_TOKEN + b'.' as HalfWord;
+                    self.print_esc("right.");
+                },
+                _ => {
+                    *info_mut(p) = RIGHT_BRACE_TOKEN + b'}' as HalfWord;
+                    self.print_char(b'}');
+                },
             }
+            self.print(" inserted");
+            ins_list!(self, link(TEMP_HEAD));
+            self.error(TeXError::MissingEndGroup)?; // Uses MissingEndGroup for the help message
             // End section 1065
         }
+        Ok(())
     }
 
     // Section 1068
@@ -75,11 +100,18 @@ impl Global {
         match self.cur_group {
             SIMPLE_GROUP => self.unsave()?,
 
-            BOTTOM_LEVEL => return Err(TeXError::TooManyRightBraces),
+            BOTTOM_LEVEL => {
+                self.error(TeXError::TooManyRightBraces)?;
+                return Ok(());
+            },
 
             SEMI_SIMPLE_GROUP
             | MATH_SHIFT_GROUP
-            | MATH_LEFT_GROUP => return Err(TeXError::ExtraRightBraceOrForgotten),
+            | MATH_LEFT_GROUP => {
+                self.error(TeXError::ExtraRightBraceOrForgotten)?;
+                self.align_state += 1;
+                return Ok(());
+            },
             
             // Section 1085
             HBOX_GROUP => self.package(0)?,
@@ -136,7 +168,14 @@ impl Global {
             OUTPUT_GROUP => {
                 // Section 1026
                 if self.loc() != NULL || (self.token_type() != OUTPUT_TEXT && self.token_type() != BACKED_UP) {
-                    return Err(TeXError::UnbalancedOutputRoutine);
+                    // Section 1027
+                    self.error(TeXError::UnbalancedOutputRoutine)?;
+                    loop {
+                        self.get_token()?;
+                        if self.loc() == NULL {
+                            break;
+                        }
+                    }
                 }
                 self.end_token_list()?;
                 self.end_graf()?;
@@ -146,7 +185,7 @@ impl Global {
 
                 // Section 1028
                 if r#box(255) != NULL {
-                    return Err(TeXError::OutputRoutineDidntUseAllOfBox255);
+                    self.error(TeXError::OutputRoutineDidntUseAllOfBox255)?;
                 }
                 // End section 1028
 
@@ -174,7 +213,11 @@ impl Global {
             // End section 1118
 
             // Section 1132
-            ALIGN_GROUP => return Err(TeXError::MissingCr),
+            ALIGN_GROUP => {
+                self.back_input()?;
+                self.cur_tok = CS_TOKEN_FLAG + FROZEN_CR;
+                self.ins_error(TeXError::MissingCr)?;
+            },
             // End section 1132
 
             // Section 1133
@@ -312,7 +355,8 @@ impl Global {
                     *leader_ptr_mut(self.tail()) = self.cur_box;
                 }
                 else {
-                    return Err(TeXError::LeadersNotFollowedByProperGlue);
+                    self.back_error(TeXError::LeadersNotFollowedByProperGlue)?;
+                    self.flush_node_list(self.cur_box)?;
                 }
                 // End section 1078
             }
@@ -341,12 +385,12 @@ impl Global {
                 // Section 1080
                 self.cur_box = NULL;
                 if self.mode().abs() == MMODE {
-                    return Err(TeXError::CantUseIn);
+                    self.error(TeXError::LastBoxVoidMath)?;
                 }
-                if self.mode() == VMODE && self.head() == self.tail() {
-                    return Err(TeXError::CantUseIn2);
+                else if self.mode() == VMODE && self.head() == self.tail() {
+                    self.error(TeXError::LastBoxVoidVmode)?;
                 }
-                if !self.is_char_node(self.tail())
+                else if !self.is_char_node(self.tail())
                     && (r#type(self.tail()) == HLIST_NODE || r#type(self.tail()) == VLIST_NODE)
                 {
                     // Section 1081
@@ -381,7 +425,7 @@ impl Global {
                 self.scan_eight_bit_int()?;
                 let n = self.cur_val;
                 if !self.scan_keyword(b"to")? {
-                    return Err(TeXError::MissingTo);
+                    self.error(TeXError::MissingTo)?;
                 }
                 self.scan_dimen(false, false, false)?;
                 self.cur_box = self.vsplit(n as u8, self.cur_val)?;
@@ -442,7 +486,9 @@ impl Global {
             self.box_end(box_content)
         }
         else {
-            Err(TeXError::BoxWasSupposedToBeHere)
+            // Section 1084: back_error and return (no box produced)
+            self.back_error(TeXError::BoxWasSupposedToBeHere)?;
+            Ok(())
         }
     }
 
@@ -542,7 +588,8 @@ impl Global {
                 self.off_save()
             }
             else {
-                Err(TeXError::CantUseHrule)
+                self.error(TeXError::CantUseHrule)?;
+                Ok(())
             }
         }
         else {
@@ -564,7 +611,8 @@ impl Global {
                 self.line_break(widow_penalty())?;
             }
             self.normal_paragraph()?;
-            // no error_count
+            // Section 1096: reset error_count at end of every paragraph
+            self.error_count = 0;
         }
         Ok(())
     }
@@ -577,7 +625,8 @@ impl Global {
         else {
             self.scan_eight_bit_int()?;
             if self.cur_val == 255 {
-                return Err(TeXError::CantInsert255);
+                self.error(TeXError::CantInsert255)?;
+                self.cur_val = 0;
             }
         }
         *self.saved_mut(0) = self.cur_val;
@@ -618,7 +667,7 @@ impl Global {
         if self.mode() == VMODE && self.tail() == self.head() {
             // Section 1106
             if self.cur_chr != (GLUE_NODE as HalfWord) || self.last_glue != MAX_HALFWORD {
-                return Err(TeXError::CantTakeThings);
+                self.error(TeXError::CantTakeThings)?;
             }
             // End section 1106
         }
@@ -661,7 +710,8 @@ impl Global {
             || (self.mode().abs() == VMODE && r#type(p) != VLIST_NODE)
             || (self.mode().abs() == HMODE && r#type(p) != HLIST_NODE)
         {
-            return Err(TeXError::IncompatibleListCantBeUnboxed);
+            self.error(TeXError::IncompatibleListCantBeUnboxed)?;
+            return Ok(());
         }
         if c == COPY_CODE {
             *link_mut(self.tail()) = self.copy_node_list(list_ptr(p))?;
@@ -733,7 +783,14 @@ impl Global {
                 && r#type(p) != KERN_NODE
                 && r#type(p) != LIGATURE_NODE
             {
-                return Err(TeXError::ImproperDiscList);
+                self.error(TeXError::ImproperDiscList)?;
+                self.begin_diagnostic();
+                self.print_nl("The following discretionary sublist has been deleted:");
+                self.show_box(p);
+                self.end_diagnostic(true);
+                self.flush_node_list(p)?;
+                *link_mut(q) = NULL;
+                break; // goto done
             }
             q = p;
             p = link(q);
@@ -751,14 +808,18 @@ impl Global {
             _ /* 2 */ => {
                 // Section 1120
                 if n > 0 && self.mode().abs() == MMODE {
-                    return Err(TeXError::IllegalMathDisc);
+                    self.flush_node_list(p)?;
+                    n = 0;
+                    self.error(TeXError::IllegalMathDisc)?;
                 }
-                *link_mut(self.tail()) = p;
+                else {
+                    *link_mut(self.tail()) = p;
+                }
                 if n <= MAX_QUARTERWORD as Integer {
                     *replace_count_mut(self.tail()) = n as QuarterWord;
                 }
                 else {
-                    return Err(TeXError::DiscListTooLong);
+                    self.error(TeXError::DiscListTooLong)?;
                 }
                 if n > 0 {
                     *self.tail_mut() = q;
@@ -837,17 +898,26 @@ impl Global {
     // Section 1127
     pub(crate) fn align_error(&mut self) -> TeXResult<()> {
         if self.align_state.abs() > 2 {
-            Err(TeXError::MisplacedTabMark)
+            // Section 1128: Express consternation
+            self.error(TeXError::MisplacedTabMark)?;
         }
         else {
             self.back_input()?;
             if self.align_state < 0 {
-                Err(TeXError::MissingLeftBrace3)
+                self.print_nl("! ");
+                self.print("Missing { inserted");
+                self.align_state += 1;
+                self.cur_tok = LEFT_BRACE_TOKEN + b'{' as HalfWord;
             }
             else {
-                Err(TeXError::MissingRightBrace2)
+                self.print_nl("! ");
+                self.print("Missing } inserted");
+                self.align_state -= 1;
+                self.cur_tok = RIGHT_BRACE_TOKEN + b'}' as HalfWord;
             }
+            self.ins_error(TeXError::MissingLeftBrace3)?;
         }
+        Ok(())
     }
 
     // Section 1131

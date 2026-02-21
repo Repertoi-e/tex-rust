@@ -102,7 +102,7 @@ impl Global {
                         self.insert_relax()?;
                     }
                     else {
-                        return Err(TeXError::ExtraFiOrElse);
+                        self.error(TeXError::ExtraFiOrElse)?;
                     }
                 }
                 else {
@@ -128,7 +128,7 @@ impl Global {
                 // End section 378
             },
 
-            _ => return Err(TeXError::UndefinedControlSequence) 
+            _ => self.error(TeXError::UndefinedControlSequence)?
         }
 
         Ok(())
@@ -166,7 +166,7 @@ impl Global {
             }
         }
         if self.cur_cmd != END_CS_NAME {
-            return Err(TeXError::MissingEncCSName);
+            self.back_error(TeXError::MissingEncCSName)?;
         }
 
         // Section 374
@@ -316,7 +316,18 @@ impl Global {
             // End section 401
         }
         if info(r) != END_MATCH_TOKEN {
-            (r, n) = self.sec391_scan_the_parameters_and_make(r, n)?;
+            match self.sec391_scan_the_parameters_and_make(r, n)? {
+                Some((new_r, new_n)) => {
+                    r = new_r;
+                    n = new_n;
+                }
+                None => {
+                    // §396 abort: parameters already flushed, just restore state
+                    self.scanner_status = save_scanner_status;
+                    self.warning_index = save_warning_index;
+                    return Ok(());
+                }
+            }
         }
 
         // Section 390
@@ -350,9 +361,9 @@ impl Global {
     }
 
     // Section 391
-    fn sec391_scan_the_parameters_and_make(&mut self, mut r: HalfWord, mut n: usize) -> TeXResult<(HalfWord, usize)> {
+    fn sec391_scan_the_parameters_and_make(&mut self, mut r: HalfWord, mut n: usize) -> TeXResult<Option<(HalfWord, usize)>> {
         self.scanner_status = Status::Matching;
-        let mut unbalance;
+        let mut unbalance: HalfWord = 0;
         self.long_state = eq_type(self.cur_cs);
         if self.long_state >= OUTER_CALL {
             self.long_state -= 2;
@@ -395,7 +406,9 @@ impl Global {
                 // Section 397
                 if s != r {
                     if s == NULL {
-                        return Err(TeXError::DoesNotMatchDefinition);
+                        // tex.web §398: error; return — abort macro_call
+                        self.error(TeXError::DoesNotMatchDefinition)?;
+                        return Ok(None);
                     }
                     let mut t = s;
                     'sec397: loop {
@@ -429,8 +442,17 @@ impl Global {
 
                 if self.cur_tok == self.par_token && self.long_state != LONG_CALL {
                     // Section 396
-                    self.runaway();
-                    return Err(TeXError::ParagraphEndedBefore);
+                    if self.long_state == CALL {
+                        self.runaway();
+                        self.back_error(TeXError::ParagraphEndedBefore)?;
+                    }
+                    // tex.web: pstack/flush/return executes for both CALL and OUTER_CALL
+                    self.pstack[n] = link(TEMP_HEAD);
+                    self.align_state -= unbalance;
+                    for mm in 0..=n {
+                        self.flush_list(self.pstack[mm]);
+                    }
+                    return Ok(None); // Signal abort
                     // End section 396
                 }
                 if self.cur_tok < RIGHT_BRACE_LIMIT {
@@ -441,8 +463,17 @@ impl Global {
                             self.fast_store_new_token(&mut p, self.cur_tok)?;
                             self.get_token()?;
                             if self.cur_tok == self.par_token && self.long_state != LONG_CALL {
-                                self.runaway();
-                                return Err(TeXError::ParagraphEndedBefore);
+                                if self.long_state == CALL {
+                                    self.runaway();
+                                    self.back_error(TeXError::ParagraphEndedBefore)?;
+                                }
+                                // tex.web: pstack/flush/return executes for both CALL and OUTER_CALL
+                                self.pstack[n] = link(TEMP_HEAD);
+                                self.align_state -= unbalance;
+                                for mm in 0..=n {
+                                    self.flush_list(self.pstack[mm]);
+                                }
+                                return Ok(None); // Signal abort
                             }
                             if self.cur_tok < RIGHT_BRACE_LIMIT {
                                 if self.cur_tok < LEFT_BRACE_LIMIT {
@@ -462,7 +493,14 @@ impl Global {
                         // End section 399
                     }
                     else {
-                        return Err(TeXError::ArgumentExtraRightBrace);
+                        // Section 395: Report an extra right brace and goto continue
+                        self.back_input()?;
+                        self.align_state += 1;
+                        self.long_state = CALL;
+                        self.cur_tok = self.par_token;
+                        self.ins_error(TeXError::ArgumentExtraRightBrace)?;
+                        continue 'sec392; // Goto continue
+                        // End section 395
                     }
                 }
                 else {
@@ -509,6 +547,6 @@ impl Global {
                 break 'sec391;
             }
         }
-        Ok((r, n))
+        Ok(Some((r, n)))
     }
 }

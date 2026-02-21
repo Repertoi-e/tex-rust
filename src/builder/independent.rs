@@ -16,7 +16,7 @@ use crate::strings::{
 };
 use crate::{
     Global, HalfWord, Integer, QuarterWord, SmallNumber, StrNum,
-    add_glue_ref, add_token_ref, back_list, free_avail, hi, mult_integers, nx_plus_y,
+    add_glue_ref, add_token_ref, back_list, free_avail, hi,
     odd, sec404_get_next_nonblank_nonrelax_noncall_token, update_terminal
 };
 use std::io::Write;
@@ -33,13 +33,15 @@ impl Global {
             }
             sec404_get_next_nonblank_nonrelax_noncall_token!(self);
             if self.cur_cmd <= MAX_NON_PREFIXED_COMMAND {
-                return Err(TeXError::CantUsePrefix);
+                // Section 1212: back_error and return
+                self.back_error(TeXError::CantUsePrefix)?;
+                return Ok(());
             }
         }
 
         // Section 1213
         if self.cur_cmd != DEF && a % 4 != 0 {
-            return Err(TeXError::CantUseLongOuter);
+            self.error(TeXError::CantUseLongOuter)?;
         }
         // End section 1213
 
@@ -172,7 +174,7 @@ impl Global {
                 self.scan_int()?;
                 let n = self.cur_val;
                 if !self.scan_keyword(b"to")? {
-                    return Err(TeXError::MissingTo2);
+                    self.error(TeXError::MissingTo2)?;
                 }
                 self.get_r_token()?;
                 let p = self.cur_cs;
@@ -286,7 +288,8 @@ impl Global {
                 self.scan_optional_equals()?;
                 self.scan_int()?;
                 if self.cur_val < 0 && p < DEL_CODE_BASE || self.cur_val > n {
-                    return Err(TeXError::InvalidCode(n, p));
+                    self.error(TeXError::InvalidCode(n, p))?;
+                    self.cur_val = 0;
                 }
                 if p < MATH_CODE_BASE {
                     define!(p, DATA, self.cur_val);
@@ -333,7 +336,7 @@ impl Global {
                     self.scan_box(BOX_FLAG + n)?;
                 }
                 else {
-                    return Err(TeXError::ImproperSetbox);
+                    self.error(TeXError::ImproperSetbox)?;
                 }
             },
             // End section 1241
@@ -380,7 +383,10 @@ impl Global {
                         self.new_patterns()?;
                     }
                     else {
-                        return Err(TeXError::PatternsOnlyIniTeX);
+                        self.error(TeXError::PatternsOnlyIniTeX)?;
+                        // tex.web: link(garbage):=scan_toks(false,false); flush_list(def_ref);
+                        let _ = self.scan_toks(false, false)?;
+                        self.flush_list(self.def_ref);
                     }
                 }
                 else {
@@ -440,16 +446,23 @@ impl Global {
     // Section 1215
     fn get_r_token(&mut self) -> TeXResult<()> {
         loop {
-            self.get_token()?;
-            if self.cur_tok != SPACE_TOKEN {
-                break;
+            loop {
+                self.get_token()?;
+                if self.cur_tok != SPACE_TOKEN {
+                    break;
+                }
             }
-        }
-        if self.cur_cs == 0 || self.cur_cs > FROZEN_CONTROL_SEQUENCE {
-            Err(TeXError::MissingControlSequence)
-        }
-        else {
-            Ok(())
+            if self.cur_cs == 0 || self.cur_cs > FROZEN_CONTROL_SEQUENCE {
+                if self.cur_cs == 0 {
+                    self.back_input()?;
+                }
+                self.cur_tok = CS_TOKEN_FLAG + FROZEN_PROTECTION;
+                self.ins_error(TeXError::MissingControlSequence)?;
+                // goto restart - continue outer loop
+            }
+            else {
+                return Ok(());
+            }
         }
     }
 
@@ -506,7 +519,8 @@ impl Global {
                     break 'sec1237 (self.cur_chr, (self.cur_cmd as Integer) - (ASSIGN_INT as Integer));
                 }
                 if self.cur_cmd != REGISTER {
-                    return Err(TeXError::CantUseAfterCmd(q as QuarterWord));
+                    self.error(TeXError::CantUseAfterCmd(q as QuarterWord))?;
+                    return Ok(());
                 }
             }
             let p = self.cur_chr;
@@ -578,42 +592,69 @@ impl Global {
         else {
             // Section 1240
             self.scan_int()?;
-            self.cur_val = if p < GLUE_VAL {
-                if q == MULTIPLY {
+            self.arith_error = false;
+            if p < GLUE_VAL {
+                self.cur_val = if q == MULTIPLY {
                     if p == INT_VAL {
-                        mult_integers!(eqtb(l as usize).int(), self.cur_val)
+                        match mult_and_add(eqtb(l as usize).int(), self.cur_val, 0, 0x7fff_ffff) {
+                            Ok(v) => v,
+                            Err(_) => { self.arith_error = true; 0 }
+                        }
                     }
                     else {
-                        nx_plus_y!(eqtb(l as usize).int(), self.cur_val, 0)
+                        match mult_and_add(eqtb(l as usize).int(), self.cur_val, 0, 0x3fff_ffff) {
+                            Ok(v) => v,
+                            Err(_) => { self.arith_error = true; 0 }
+                        }
                     }
                 }
                 else {
-                    x_over_n(eqtb(l as usize).int(), self.cur_val)?.0
-                }
+                    match x_over_n(eqtb(l as usize).int(), self.cur_val) {
+                        Ok((v, _)) => v,
+                        Err(_) => { self.arith_error = true; 0 }
+                    }
+                };
             }
             else {
                 let s = equiv(l);
                 let r = self.new_spec(s)?;
-                (
-                    *width_mut(r),
-                    *stretch_mut(r),
-                    *shrink_mut(r)
-                ) = if q == MULTIPLY {
-                    (
-                        nx_plus_y!(width(s), self.cur_val, 0),
-                        nx_plus_y!(stretch(s), self.cur_val, 0),
-                        nx_plus_y!(shrink(s), self.cur_val, 0),
-                    )
+                if q == MULTIPLY {
+                    *width_mut(r) = match mult_and_add(width(s), self.cur_val, 0, 0x3fff_ffff) {
+                        Ok(v) => v,
+                        Err(_) => { self.arith_error = true; 0 }
+                    };
+                    *stretch_mut(r) = match mult_and_add(stretch(s), self.cur_val, 0, 0x3fff_ffff) {
+                        Ok(v) => v,
+                        Err(_) => { self.arith_error = true; 0 }
+                    };
+                    *shrink_mut(r) = match mult_and_add(shrink(s), self.cur_val, 0, 0x3fff_ffff) {
+                        Ok(v) => v,
+                        Err(_) => { self.arith_error = true; 0 }
+                    };
                 }
                 else {
-                    (
-                        x_over_n(width(s), self.cur_val)?.0,
-                        x_over_n(stretch(s), self.cur_val)?.0,
-                        x_over_n(shrink(s), self.cur_val)?.0,
-                    )
-                };
-                r
-            };
+                    *width_mut(r) = match x_over_n(width(s), self.cur_val) {
+                        Ok((v, _)) => v,
+                        Err(_) => { self.arith_error = true; 0 }
+                    };
+                    *stretch_mut(r) = match x_over_n(stretch(s), self.cur_val) {
+                        Ok((v, _)) => v,
+                        Err(_) => { self.arith_error = true; 0 }
+                    };
+                    *shrink_mut(r) = match x_over_n(shrink(s), self.cur_val) {
+                        Ok((v, _)) => v,
+                        Err(_) => { self.arith_error = true; 0 }
+                    };
+                }
+                self.cur_val = r;
+            }
+            if self.arith_error {
+                self.error(TeXError::Arith)?;
+                if p >= GLUE_VAL {
+                    self.delete_glue_ref(self.cur_val);
+                }
+                return Ok(());
+            }
             // End section 1240
         }
         if p < GLUE_VAL {
@@ -629,7 +670,8 @@ impl Global {
     // Section 1243
     fn alter_aux(&mut self) -> TeXResult<()> {
         if self.cur_chr != self.mode().abs() {
-            return Err(TeXError::ReportIllegalCase);
+            self.error(TeXError::ReportIllegalCase)?;
+            return Ok(());
         }
         let c = self.cur_chr;
         self.scan_optional_equals()?;
@@ -640,9 +682,11 @@ impl Global {
         else {
             self.scan_int()?;
             if self.cur_val <= 0 || self.cur_val > 32767 {
-                return Err(TeXError::BadSpaceFactor);
+                self.error(TeXError::BadSpaceFactor)?;
             }
-            *self.space_factor_mut() = self.cur_val;
+            else {
+                *self.space_factor_mut() = self.cur_val;
+            }
         }
         Ok(())
     }
@@ -657,9 +701,11 @@ impl Global {
         self.scan_optional_equals()?;
         self.scan_int()?;
         if self.cur_val < 0 {
-            return Err(TeXError::BadPrevGraf);
+            self.error(TeXError::BadPrevGraf)?;
         }
-        self.nest[p].pg_field = self.cur_val;
+        else {
+            self.nest[p].pg_field = self.cur_val;
+        }
         self.cur_list = self.nest[self.nest_ptr];
         Ok(())
     }
@@ -754,18 +800,20 @@ impl Global {
         let s = if self.scan_keyword(b"at")? {
             // Section 1259
             self.scan_dimen(false, false, false)?;
-            let s = self.cur_val;
+            let mut s = self.cur_val;
             if s <= 0 || s >= 0x800_0000 {
-                return Err(TeXError::ImproperAt(s));
+                self.error(TeXError::ImproperAt(s))?;
+                s = 10 * UNITY; // recovery: replace with 10pt
             }
             // End section 1259
             s
         }
         else if self.scan_keyword(b"scaled")? {
             self.scan_int()?;
-            let s = -self.cur_val;
+            let mut s = -self.cur_val;
             if self.cur_val <= 0 || self.cur_val >= 32768 {
-                return Err(TeXError::IllegalMag(self.cur_val));
+                self.error(TeXError::IllegalMag(self.cur_val))?;
+                s = -1000;
             }
             s
         }
@@ -797,7 +845,14 @@ impl Global {
             }
             // End section 1260
 
-            self.read_font_info(u, self.cur_name, self.cur_area, s)?
+            match self.read_font_info(u, self.cur_name, self.cur_area, s) {
+                Ok(f) => f,
+                Err(e @ TeXError::TfmNotLoadable(..)) | Err(e @ TeXError::TfmNotLoaded(..)) => {
+                    self.error(e)?;
+                    NULL_FONT as usize
+                },
+                Err(e) => return Err(e),
+            }
         };
     
         // common_ending:
@@ -878,7 +933,11 @@ impl Global {
             // End section 1280
         }
         else {
-            return Err(TeXError::ErrMessage(s));
+            // Section 1283
+            if equiv(ERR_HELP_LOC) != NULL {
+                self.use_err_help = true;
+            }
+            self.error(TeXError::ErrMessage(s))?;
         }
         flush_string();
         Ok(())

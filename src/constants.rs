@@ -31,12 +31,35 @@ pub(crate) const ENDTEMPLATE_STRING: StrNum = 270;
 pub(crate) const BANNER: &str = "This is TeX, Version 3.141592653";
 
 // Section 11
+// TRIP test (tripman.tex §2) requires: mem_min=mem_bot=1, mem_top=mem_max=3000,
+// error_line=64, half_error_line=32, max_print_line=72.
+#[cfg(feature = "trip")]
+pub(crate) const MEM_MAX: Integer = 3000;
+#[cfg(not(feature = "trip"))]
 pub(crate) const MEM_MAX: Integer = 30000;
+
 pub(crate) const MEM_MIN: Integer = 0;
-pub(crate) const BUF_SIZE: Integer = 200_000; // 500 is not enough
+
+#[cfg(feature = "trip")]
+pub(crate) const BUF_SIZE: Integer = 500;
+#[cfg(not(feature = "trip"))]
+pub(crate) const BUF_SIZE: Integer = 200_000;
+
+#[cfg(feature = "trip")]
+pub(crate) const ERROR_LINE: Integer = 64;
+#[cfg(not(feature = "trip"))]
 pub(crate) const ERROR_LINE: Integer = 72;
+
+#[cfg(feature = "trip")]
+pub(crate) const HALF_ERROR_LINE: Integer = 32;
+#[cfg(not(feature = "trip"))]
 pub(crate) const HALF_ERROR_LINE: Integer = 36;
+
+#[cfg(feature = "trip")]
+pub(crate) const MAX_PRINT_LINE: Integer = 72;
+#[cfg(not(feature = "trip"))]
 pub(crate) const MAX_PRINT_LINE: Integer = 79;
+
 pub(crate) const STACK_SIZE: Integer = 200;
 pub(crate) const MAX_IN_OPEN: Integer = 6;
 pub(crate) const FONT_MAX: Integer = 75;
@@ -52,7 +75,12 @@ pub(crate) const DVI_BUF_SIZE: Integer = 800;
 
 // Section 12
 pub(crate) const MEM_BOT: Integer = 0;
+
+#[cfg(feature = "trip")]
+pub(crate) const MEM_TOP: Integer = 3000;
+#[cfg(not(feature = "trip"))]
 pub(crate) const MEM_TOP: Integer = 30000;
+
 pub(crate) const FONT_BASE: Integer = 0;
 pub(crate) const HASH_SIZE: Integer = 2100;
 pub(crate) const HASH_PRIME: Integer = 1777;
@@ -79,13 +107,15 @@ pub(crate) const NEW_STRING: Integer = 21;
 // Part 6: Reporting errors
 // Section 73
 pub(crate) const BATCH_MODE: Integer = 0;
+pub(crate) const NONSTOP_MODE: Integer = 1;
+pub(crate) const SCROLL_MODE: Integer = 2;
 pub(crate) const ERROR_STOP_MODE: Integer = 3;
 
 // Section 76
 pub const SPOTLESS: usize = 0;
 pub(crate) const WARNING_ISSUED: usize = 1;
-// pub(crate) const ERROR_MESSAGE_ISSUED: usize = 2;
-// pub(crate) const FATAL_ERROR_STOP: usize = 3;
+pub(crate) const ERROR_MESSAGE_ISSUED: usize = 2;
+pub(crate) const FATAL_ERROR_STOP: usize = 3;
 
 // Part 7: Arithmetic with scaled dimensions
 // Section 101
@@ -554,7 +584,7 @@ pub(crate) const LEFT_BRACE_TOKEN: HalfWord = 0x100;
 pub(crate) const LEFT_BRACE_LIMIT: HalfWord = 0x200;
 pub(crate) const RIGHT_BRACE_TOKEN: HalfWord = 0x200;
 pub(crate) const RIGHT_BRACE_LIMIT: HalfWord = 0x300;
-// pub(crate) const MATH_SHIFT_TOKEN: HalfWord = 0x300;
+pub(crate) const MATH_SHIFT_TOKEN: HalfWord = 0x300;
 pub(crate) const TAB_TOKEN: HalfWord = 0x400;
 pub(crate) const OUT_PARAM_TOKEN: HalfWord = 0x500;
 pub(crate) const SPACE_TOKEN: HalfWord = 0xa20;

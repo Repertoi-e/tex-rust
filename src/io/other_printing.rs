@@ -4,7 +4,7 @@ use crate::constants::*;
 use crate::datastructures::{
     r#box, cat_code, count, height, link, subtype, text, tracing_online, r#type
 };
-use crate::error::TeXResult;
+use crate::error::{TeXError, TeXResult};
 use crate::extensions::write_stream;
 use crate::strings::str_ptr;
 use crate::{
@@ -61,7 +61,7 @@ impl Global {
             if m == HMODE && self.nest[p].pg_field != 0x83_0000 {
                 self.print(" (language");
                 self.print_int(self.nest[p].pg_field % 65536);
-                self.print(":hyphemin");
+                self.print(":hyphenmin");
                 self.print_int(self.nest[p].pg_field / 0x40_0000);
                 self.print_char(b',');
                 self.print_int((self.nest[p].pg_field / 65536) % 64);
@@ -75,7 +75,7 @@ impl Global {
                 if PAGE_HEAD != self.page_tail {
                     self.print_nl("### current page:");
                     if self.output_active {
-                        self.print(" (held over for next output");
+                        self.print(" (held over for next output)");
                     }
                     self.show_box(link(PAGE_HEAD));
                     if (self.page_contents as HalfWord) > EMPTY {
@@ -128,7 +128,7 @@ impl Global {
             // Section 219
             match m.abs() / (MAX_COMMAND + 1) as Integer {
                 0 => {
-                    self.print_nl("prev_depth ");
+                    self.print_nl("prevdepth ");
                     if a.sc() <= IGNORE_DEPTH {
                         self.print("ignored");
                     }
@@ -136,7 +136,7 @@ impl Global {
                         self.print_scaled(a.sc());
                     }
                     if self.nest[p].pg_field != 0 {
-                        self.print(", prevgraph ");
+                        self.print(", prevgraf ");
                         self.print_int(self.nest[p].pg_field);
                         self.print(" line");
                         if self.nest[p].pg_field != 1 {
@@ -148,7 +148,7 @@ impl Global {
                 1 => {
                     self.print_nl("spacefactor ");
                     self.print_int(a.hh_lh());
-                    if m > 0 && a.hh_lh() > 0 {
+                    if m > 0 && a.hh_rh() > 0 {
                         self.print(", current language ");
                         self.print_int(a.hh_rh());
                     }
@@ -156,7 +156,7 @@ impl Global {
 
                 _ /* 2 */ => {
                     if a.int() != NULL {
-                        self.print("this will be denominator of :");
+                        self.print("this will begin denominator of:");
                         self.show_box(a.int());
                     }
                 }
@@ -371,7 +371,7 @@ impl Global {
                 }
             }
             else if n < CUR_FONT_LOC {
-                self.print_esc("BOX");
+                self.print_esc("box");
                 self.print_int(n - BOX_BASE);
                 self.print_char(b'=');
                 if equiv(n) == NULL {
@@ -622,7 +622,13 @@ impl Global {
         }
 
         // common_ending:
-        // No support for interaction.
+        // Section 1293: tex.web pre-decrements error_count when
+        // interaction < error_stop_mode so that error()'s increment
+        // leaves it unchanged (showing is not a real error).
+        if self.interaction < ERROR_STOP_MODE {
+            self.error_count -= 1;
+        }
+        self.error(TeXError::ShowWhatever)?;
         Ok(())
     }
 

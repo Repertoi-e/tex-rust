@@ -6,7 +6,7 @@ use crate::datastructures::{
     eqtb, eqtb_mut, hash, hash_mut, MEM, XEQ_LEVEL, InStateRecord, InputFile, LineStack,
     ListStateRecord, MemoryWord, Status, box_mut, cat_code_mut, cur_font_mut,
     day_mut, del_code_mut, end_line_char_mut, eq_level_mut, eq_type_mut,
-    equiv_mut, escape_char_mut, glue_ref_count_mut, hang_after_mut, info_mut,
+    equiv_mut, escape_char_mut, geq_word_define, glue_ref_count_mut, hang_after_mut, info_mut,
     lc_code_mut, link_mut, llink_mut, mag, mag_mut, math_code_mut,
     max_dead_cycles_mut, month_mut, next_mut, node_size_mut, par_shape_ptr_mut,
     rlink_mut, sf_code_mut, shrink_mut, shrink_order_mut, stretch_mut,
@@ -56,8 +56,12 @@ impl Default for Global {
             interaction: 0,
 
             // Section 76
+            deletions_allowed: false,
             set_box_allowed: false,
             history: 0,
+            error_count: 0,
+            use_err_help: false,
+            long_help_seen: false,
 
             // Section 96
             interrupt: false,
@@ -359,6 +363,12 @@ impl Default for Global {
             // Section 839
             disc_width: 0,
 
+            // Section 104
+            arith_error: false,
+
+            // Section 825
+            no_shrink_error_yet: false,
+
             // Section 847
             easy_line: 0,
             last_special_line: 0,
@@ -534,10 +544,15 @@ impl Global {
     // Section 288
     pub(crate) fn prepare_mag(&mut self) -> TeXResult<()> {
         if self.mag_set > 0 && mag() != self.mag_set {
-            return Err(TeXError::IncompatibleMag);
+            // Section 288: error first (so mag() still holds the conflicting value),
+            // then reset. tex.web: int_error(mag_set); geq_word_define(...)
+            self.error(TeXError::IncompatibleMag)?;
+            geq_word_define(INT_BASE + MAG_CODE, self.mag_set);
         }
         if mag() <= 0 || mag() > 32768 {
-            return Err(TeXError::IllegalMag(mag()));
+            let bad_mag = mag();
+            geq_word_define(INT_BASE + MAG_CODE, 1000);
+            self.error(TeXError::IllegalMag(bad_mag))?;
         }
         self.mag_set = mag();
         Ok(())
@@ -837,7 +852,10 @@ impl Global {
         // End section 74
 
         // Section 77
+        self.deletions_allowed = true;
         self.set_box_allowed = true;
+        self.error_count = 0;
+        self.use_err_help = false;
         // End section 77
 
         // Section 97
@@ -1187,7 +1205,7 @@ impl Global {
         self.primitive(b"omit", OMIT, 0)?;
         self.primitive(b"parshape", SET_SHAPE, 0)?;
         self.primitive(b"penalty", BREAK_PENALTY, 0)?;
-        self.primitive(b"prevgraph", SET_PREV_GRAF, 0)?;
+        self.primitive(b"prevgraf", SET_PREV_GRAF, 0)?;
         self.primitive(b"radical", RADICAL, 0)?;
         self.primitive(b"read", READ_TO_CS, 0)?;
         self.primitive(b"relax", RELAX, 256)?;
@@ -1436,10 +1454,9 @@ impl Global {
         self.primitive(b"skewchar", ASSIGN_FONT_INT, 1)?;
 
         // Section 1262
-        // \nonstopmode and \scrollmode are merged with \batch_mode
         self.primitive(b"batchmode", SET_INTERACTION, BATCH_MODE)?;
-        self.primitive(b"nonstopmode", SET_INTERACTION, BATCH_MODE)?;
-        self.primitive(b"scrollmode", SET_INTERACTION, BATCH_MODE)?;
+        self.primitive(b"nonstopmode", SET_INTERACTION, NONSTOP_MODE)?;
+        self.primitive(b"scrollmode", SET_INTERACTION, SCROLL_MODE)?;
         self.primitive(b"errorstopmode", SET_INTERACTION, ERROR_STOP_MODE)?;
 
         // Section 1272

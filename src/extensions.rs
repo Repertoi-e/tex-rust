@@ -137,15 +137,16 @@ impl Global {
             SET_LANGUAGE_CODE => {
                 // Section 1377
                 if self.mode().abs() != HMODE {
-                    return Err(TeXError::ReportIllegalCase);
+                    self.error(TeXError::ReportIllegalCase)?;
+                    return Ok(());
                 }
                 self.new_whatsit(LANGUAGE_NODE as QuarterWord, SMALL_NODE_SIZE)?;
                 self.scan_int()?;
-                *self.clang_mut() = if (1..=254).contains(&self.cur_val) {
-                    self.cur_val
+                *self.clang_mut() = if self.cur_val <= 0 || self.cur_val > 255 {
+                    0
                 }
                 else {
-                    0
+                    self.cur_val
                 };
                 *what_lang_mut(self.tail()) = self.clang();
                 *what_lhm_mut(self.tail()) = norm_min(left_hyphen_min()) as QuarterWord;
@@ -191,11 +192,11 @@ impl Global {
 
     // Section 1376
     pub(crate) fn fix_language(&mut self) -> TeXResult<()> {
-        let l = if (1..=254).contains(&language()) {
-            language()
+        let l = if language() <= 0 || language() > 255 {
+            0
         }
         else {
-            0
+            language()
         };
         if l != self.clang() {
             self.new_whatsit(LANGUAGE_NODE as QuarterWord, SMALL_NODE_SIZE)?;

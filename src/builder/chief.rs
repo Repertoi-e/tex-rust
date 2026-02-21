@@ -116,7 +116,10 @@ impl Global {
                     | (VMODE, ITAL_CORR) // Section 1111
                     | (VMODE, EQ_NO) // Section 1144
                     | (HMODE, EQ_NO) // End section 1048
-                    | (_, MAC_PARAM) => return Err(TeXError::ReportIllegalCase),
+                    | (_, MAC_PARAM) => {
+                        self.error(TeXError::ReportIllegalCase)?;
+                        continue 'big_switch;
+                    },
 
                     // Section 1046 (math only cases in non-math mode, or vice-versa)
                     (VMODE, SUP_MARK)
@@ -159,7 +162,13 @@ impl Global {
                     | (MMODE, VSKIP)
                     | (MMODE, UN_VBOX)
                     | (MMODE, VALIGN)
-                    | (MMODE, HRULE) => return Err(TeXError::MissingDollar),
+                    | (MMODE, HRULE) => {
+                        // Section 1047: insert_dollar_sign
+                        self.back_input()?;
+                        self.cur_tok = MATH_SHIFT_TOKEN + b'$' as HalfWord;
+                        self.ins_error(TeXError::MissingDollar)?;
+                        continue 'big_switch;
+                    },
                     // End section 1046
 
                     // Section 1056
@@ -315,9 +324,9 @@ impl Global {
                     (_, CAR_RET)
                     | (_, TAB_MARK) => self.align_error()?,
 
-                    (_, NO_ALIGN) => return Err(TeXError::MisplacedNoalign),
+                    (_, NO_ALIGN) => self.error(TeXError::MisplacedNoalign)?,
 
-                    (_, OMIT) => return Err(TeXError::MisplacedOmit),
+                    (_, OMIT) => self.error(TeXError::MisplacedOmit)?,
                     // End section 1126
 
                     // Section 1130
@@ -325,12 +334,13 @@ impl Global {
                     | (HMODE, VALIGN) => self.init_align()?,
 
                     (MMODE, HALIGN) => {
-                        self.privileged()?;
-                        if self.cur_group == MATH_SHIFT_GROUP {
-                            self.init_align()?;
-                        }
-                        else {
-                            self.off_save()?;
+                        if self.privileged()? {
+                            if self.cur_group == MATH_SHIFT_GROUP {
+                                self.init_align()?;
+                            }
+                            else {
+                                self.off_save()?;
+                            }
                         }
                     },
 
@@ -339,7 +349,7 @@ impl Global {
                     // End section 1130
 
                     // Section 1134
-                    (_, END_CS_NAME) => return Err(TeXError::ExtraEndcsname),
+                    (_, END_CS_NAME) => self.error(TeXError::ExtraEndcsname)?,
                     // End section 1134
 
                     // Section 1137
@@ -348,12 +358,13 @@ impl Global {
 
                     // Section 1140
                     (MMODE, EQ_NO) => {
-                        self.privileged()?;
-                        if self.cur_group == MATH_SHIFT_GROUP {
-                            self.start_eq_no()?;
-                        }
-                        else {
-                            self.off_save()?;
+                        if self.privileged()? {
+                            if self.cur_group == MATH_SHIFT_GROUP {
+                                self.start_eq_no()?;
+                            }
+                            else {
+                                self.off_save()?;
+                            }
                         }
                     },
                     // End section 1140
@@ -921,19 +932,21 @@ impl Global {
     }
 
     // Section 1051
-    // Does not output a boolean, use TeXResult instead.
-    fn privileged(&self) -> TeXResult<()> {
+    fn privileged(&mut self) -> TeXResult<bool> {
         if self.mode() > 0 {
-            Ok(())
+            Ok(true)
         }
         else {
-            Err(TeXError::ReportIllegalCase)
+            self.error(TeXError::ReportIllegalCase)?;
+            Ok(false)
         }
     }
 
     // Section 1054
     fn its_all_over(&mut self) -> TeXResult<bool> {
-        self.privileged()?;
+        if !self.privileged()? {
+            return Ok(false);
+        }
         if PAGE_HEAD == self.page_tail && self.head() == self.tail() && self.dead_cycles == 0 {
             Ok(true)
         }

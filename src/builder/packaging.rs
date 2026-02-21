@@ -10,7 +10,7 @@ use crate::datastructures::{
     type_mut, vbadness, vfuzz, width, width_mut
 };
 use crate::{
-    Global, HalfWord, QuarterWord, Real, Scaled, SmallNumber, lig_char
+    Global, GlueRatio, HalfWord, QuarterWord, Scaled, SmallNumber, lig_char
 };
 
 // Part 33: Packaging
@@ -200,7 +200,7 @@ impl Global {
                 *glue_order_mut(r) = o;
                 *glue_sign_mut(r) = STRETCHING;
                 if self.total_stretch[o as usize] != 0 {
-                    *glue_set_mut(r) = (x as Real) / (self.total_stretch[o as usize] as Real);
+                    *glue_set_mut(r) = (x as GlueRatio) / (self.total_stretch[o as usize] as GlueRatio);
                 }
                 else {
                     *glue_sign_mut(r) = NORMAL;
@@ -246,7 +246,7 @@ impl Global {
             *glue_order_mut(r) = o;
             *glue_sign_mut(r) = SHRINKING;
             if self.total_shrink[o as usize] != 0 {
-                *glue_set_mut(r) = (-x as Real) / (self.total_shrink[o as usize] as Real);
+                *glue_set_mut(r) = (-x as GlueRatio) / (self.total_shrink[o as usize] as GlueRatio);
             }
             else {
                 *glue_sign_mut(r) = NORMAL;
@@ -455,7 +455,7 @@ impl Global {
                 *glue_order_mut(r) = o;
                 *glue_sign_mut(r) = STRETCHING;
                 if self.total_stretch[o as usize] != 0 {
-                    *glue_set_mut(r) = (x as Real) / (self.total_stretch[o as usize] as Real);
+                    *glue_set_mut(r) = (x as GlueRatio) / (self.total_stretch[o as usize] as GlueRatio);
                 }
                 else {
                     *glue_sign_mut(r) = NORMAL;
@@ -501,7 +501,7 @@ impl Global {
                 *glue_order_mut(r) = o;
                 *glue_sign_mut(r) = SHRINKING;
                 if self.total_shrink[o as usize] != 0 {
-                    *glue_set_mut(r) = (-x as Real) / (self.total_shrink[o as usize] as Real);
+                    *glue_set_mut(r) = (-x as GlueRatio) / (self.total_shrink[o as usize] as GlueRatio);
                 }
                 else {
                     *glue_sign_mut(r) = NORMAL;
@@ -540,7 +540,7 @@ impl Global {
         // common_ending:
         // Section 675
         if self.output_active {
-            self.print(") has occured while \\output is active");
+            self.print(") has occurred while \\output is active");
         }
         else {
             if self.pack_begin_line != 0 {

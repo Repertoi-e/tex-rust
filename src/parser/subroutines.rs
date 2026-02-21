@@ -10,7 +10,7 @@ use crate::datastructures::{
 use crate::error::{TeXError, TeXResult};
 use crate::{
     Global, HalfWord, Integer, QuarterWord, Scaled, SmallNumber,
-    add_glue_ref, back_list, free_avail, ho, nx_plus_y
+    add_glue_ref, back_list, free_avail, ho
 };
 
 use std::cmp::Ordering::{Equal, Greater, Less};
@@ -68,10 +68,13 @@ impl Global {
     // Section 403
     pub(crate) fn scan_left_brace(&mut self) -> TeXResult<()> {
         sec404_get_next_nonblank_nonrelax_noncall_token!(self);
-        match self.cur_cmd {
-            LEFT_BRACE => Ok(()),
-            _ => Err(TeXError::MissingLeftBrace)
+        if self.cur_cmd != LEFT_BRACE {
+            self.back_error(TeXError::MissingLeftBrace)?;
+            self.cur_cmd = LEFT_BRACE;
+            self.cur_chr = b'{' as HalfWord;
+            self.align_state += 1;
         }
+        Ok(())
     }
     
     // Section 405
@@ -128,16 +131,17 @@ impl Global {
             | DEF_FONT => {
                 // Section 415
                 if (level as Integer) != TOK_VAL {
-                    return Err(TeXError::MissingNumber);
+                    self.back_error(TeXError::MissingNumber)?;
+                    scanned_result!(self, 0, INT_VAL);
                 }
-                if self.cur_cmd <= ASSIGN_TOKS {
+                else if self.cur_cmd <= ASSIGN_TOKS {
                     if self.cur_cmd < ASSIGN_TOKS {
                         self.scan_eight_bit_int()?;
                         m = TOKS_BASE + self.cur_val;
                     }
                     scanned_result!(self, equiv(m), TOK_VAL);
                 }
-                else {
+                else if self.cur_cmd > ASSIGN_TOKS {
                     self.back_input()?;
                     self.scan_font_ident()?;
                     scanned_result!(self, FONT_ID_BASE + self.cur_val, IDENT_VAL);
@@ -156,9 +160,15 @@ impl Global {
             SET_AUX => {
                 // Section 418
                 if self.mode().abs() != m {
-                    return Err(TeXError::ImproperMode(m ));
+                    self.error(TeXError::ImproperMode(m))?;
+                    if (level as Integer) != TOK_VAL {
+                        scanned_result!(self, 0, DIMEN_VAL);
+                    }
+                    else {
+                        scanned_result!(self, 0, INT_VAL);
+                    }
                 }
-                if m == VMODE {
+                else if m == VMODE {
                     scanned_result!(self, self.prev_depth(), DIMEN_VAL);
                 }
                 else {
@@ -269,7 +279,16 @@ impl Global {
 
             LAST_ITEM => self.sec424_fetch_item_in_current_node(),
 
-            _ => return Err(TeXError::CantUseAfterThe),
+            _ => {
+                // Section 428: plain error 
+                self.error(TeXError::CantUseAfterThe)?;
+                if (level as Integer) != TOK_VAL {
+                    scanned_result!(self, 0, DIMEN_VAL);
+                }
+                else {
+                    scanned_result!(self, 0, INT_VAL);
+                }
+            },
         }
 
         while self.cur_val_level > level as Integer {
@@ -278,7 +297,7 @@ impl Global {
                 self.cur_val = width(self.cur_val);
             }
             else if self.cur_val_level == MU_VAL {
-                return Err(TeXError::IncompatibleGlueUnits);
+                self.error(TeXError::IncompatibleGlueUnits)?;
             }
             self.cur_val_level -= 1;
             // End section 429
@@ -369,56 +388,56 @@ impl Global {
     // Section 433
     pub(crate) fn scan_eight_bit_int(&mut self) -> TeXResult<()> {
         self.scan_int()?;
-        if (0..=255).contains(&self.cur_val) {
-            Ok(())
+        if !(0..=255).contains(&self.cur_val) {
+            let n = self.cur_val;
+            self.cur_val = 0;
+            self.error(TeXError::BadRegisterCode(n))?;
         }
-        else {
-            Err(TeXError::BadRegisterCode)
-        }
+        Ok(())
     }
 
     // Section 434
     pub(crate) fn scan_char_num(&mut self) -> TeXResult<()> {
         self.scan_int()?;
-        if (0..=255).contains(&self.cur_val) {
-            Ok(())
+        if !(0..=255).contains(&self.cur_val) {
+            let n = self.cur_val;
+            self.cur_val = 0;
+            self.error(TeXError::BadCharacterCode(n))?;
         }
-        else {
-            Err(TeXError::BadCharacterCode)
-        }
+        Ok(())
     }
 
     // Section 435
     pub(crate) fn scan_four_bit_int(&mut self) -> TeXResult<()> {
         self.scan_int()?;
-        if (0..=15).contains(&self.cur_val) {
-            Ok(())
+        if !(0..=15).contains(&self.cur_val) {
+            let n = self.cur_val;
+            self.cur_val = 0;
+            self.error(TeXError::BadNumber(n))?;
         }
-        else {
-            Err(TeXError::BadNumber)
-        }
+        Ok(())
     }
 
     // Section 436
     pub(crate) fn scan_fifteen_bit_int(&mut self) -> TeXResult<()> {
         self.scan_int()?;
-        if (0..=0x7fff).contains(&self.cur_val) {
-            Ok(())
+        if !(0..=0x7fff).contains(&self.cur_val) {
+            let n = self.cur_val;
+            self.cur_val = 0;
+            self.error(TeXError::BadMathChar(n))?;
         }
-        else {
-            Err(TeXError::BadMathChar)
-        }
+        Ok(())
     }
 
     // Section 437
     pub(crate) fn scan_twenty_seven_bit_int(&mut self) -> TeXResult<()> {
         self.scan_int()?;
-        if (0..=0x7ff_ffff).contains(&self.cur_val) {
-            Ok(())
+        if !(0..=0x7ff_ffff).contains(&self.cur_val) {
+            let n = self.cur_val;
+            self.cur_val = 0;
+            self.error(TeXError::BadDelimiterCode(n))?;
         }
-        else {
-            Err(TeXError::BadDelimiterCode)
-        }
+        Ok(())
     }
 
     // Section 440
@@ -464,9 +483,10 @@ impl Global {
             self.sec445_accumulate_constant_until(&mut vacuous, m)?;
             
             if vacuous {
-                return Err(TeXError::MissingNumber);
+                // Section 446
+                self.back_error(TeXError::MissingNumber)?;
             }
-            if self.cur_cmd != SPACER {
+            else if self.cur_cmd != SPACER {
                 self.back_input()?;
             }
             // End section 444
@@ -499,12 +519,13 @@ impl Global {
         };
 
         if self.cur_val > 255 {
-            Err(TeXError::ImproperAlphabeticConstant)
+            self.cur_val = b'0' as HalfWord;
+            self.back_error(TeXError::ImproperAlphabeticConstant)?;
         }
         else {
             sec443_scan_an_optional_space!(self);
-            Ok(())
         }
+        Ok(())
     }
 
     // Section 445
@@ -532,7 +553,22 @@ impl Global {
             if self.cur_val >= m
                 && (self.cur_val > m || d > 7 || self.radix != 10)
             {
-                return Err(TeXError::NumberTooBig);
+                // Section 445: Number too big - set to infinity and keep scanning
+                self.error(TeXError::NumberTooBig)?;
+                self.cur_val = 0x7fff_ffff; // infinity
+                // Skip remaining digits
+                loop {
+                    self.get_x_token()?;
+                    let is_digit = self.cur_tok >= ZERO_TOKEN && self.cur_tok <= ZERO_TOKEN + 9;
+                    let is_hex = self.radix == 16 && (
+                        (self.cur_tok >= A_TOKEN && self.cur_tok <= A_TOKEN + 5) ||
+                        (self.cur_tok >= OTHER_A_TOKEN && self.cur_tok <= OTHER_A_TOKEN + 5)
+                    );
+                    if !is_digit && !is_hex {
+                        break;
+                    }
+                }
+                break; // Goto done
             }
             self.cur_val = self.cur_val * self.radix + d;
             self.get_x_token()?;
@@ -544,6 +580,7 @@ impl Global {
     // Section 448
     pub(crate) fn scan_dimen(&mut self, mu: bool, inf: bool, shortcut: bool) -> TeXResult<()> {
         let mut f = 0;
+        self.arith_error = false;
         self.cur_order = NORMAL;
         let mut negative = false;
 
@@ -581,7 +618,7 @@ impl Global {
                         }
 
                         if self.cur_val_level != INT_VAL {
-                            return Err(TeXError::IncompatibleGlueUnits);
+                            self.error(TeXError::IncompatibleGlueUnits)?;
                         }
                     }
                     else {
@@ -624,8 +661,12 @@ impl Global {
         }
 
         // attach_sign:
-        if self.cur_val.abs() >= 0x4000_0000 {
-            return Err(TeXError::DimensionTooLarge);
+        if self.arith_error || self.cur_val.abs() >= 0x4000_0000 {
+            self.error(TeXError::DimensionTooLarge)?;
+            self.cur_val = MAX_DIMEN;
+            self.arith_error = false;
+            self.cur_cmd = SPACER;
+            self.cur_chr = b' ' as HalfWord;
         }
         if negative {
             self.cur_val = -self.cur_val
@@ -676,9 +717,11 @@ impl Global {
                     self.cur_order = FIL;
                     while self.scan_keyword(b"l")? {
                         if self.cur_order == FILLL {
-                            return Err(TeXError::IllegalUnitOfMeasureFilll);
+                            self.error(TeXError::IllegalUnitOfMeasureFilll)?;
                         }
-                        self.cur_order += 1;
+                        else {
+                            self.cur_order += 1;
+                        }
                     }
                     break 'block; // Goto attach_fraction
                 }
@@ -691,10 +734,10 @@ impl Global {
 
             if mu {
                 // Section 456
-                match self.scan_keyword(b"mu")? {
-                    true => break 'block, // Goto attach_fraction
-                    false => return Err(TeXError::IllegalUnitOfMeasureMu),
+                if !self.scan_keyword(b"mu")? {
+                    self.error(TeXError::IllegalUnitOfMeasureMu)?;
                 }
+                break 'block; // Goto attach_fraction
                 // End section 456
             }
 
@@ -702,11 +745,17 @@ impl Global {
                 // Section 457
                 self.prepare_mag()?;
                 if mag() != 1000 {
-                    let rem: Scaled;
-                    (self.cur_val, rem) = xn_over_d(self.cur_val, 1000, mag())?;
-                    f = (1000 * f + 65536 * rem) / mag();
-                    self.cur_val += f / 65536;
-                    f %= 65536;
+                    match xn_over_d(self.cur_val, 1000, mag()) {
+                        Ok((val, rem)) => {
+                            self.cur_val = val;
+                            f = (1000 * f + 65536 * rem) / mag();
+                            self.cur_val += f / 65536;
+                            f %= 65536;
+                        }
+                        Err(_) => {
+                            self.arith_error = true;
+                        }
+                    }
                 }
                 // End section 457
             }
@@ -721,13 +770,12 @@ impl Global {
         }
 
         // attach_fraction:
-        match self.cur_val.cmp(&16384) {
-            Less => {
-                self.cur_val = self.cur_val * UNITY + f;
-                Ok(false)
-            },
-            _ => Err(TeXError::Arith)
+        if self.cur_val >= 16384 {
+            self.arith_error = true;
+        } else {
+            self.cur_val = self.cur_val * UNITY + f;
         }
+        Ok(false)
     }
 
     // Section 455
@@ -750,7 +798,7 @@ impl Global {
                     }
                     // End section 451
                     if self.cur_val_level != MU_VAL {
-                        return Err(TeXError::IncompatibleGlueUnits);
+                        self.error(TeXError::IncompatibleGlueUnits)?;
                     }
                 }
                 else {
@@ -781,8 +829,15 @@ impl Global {
         };
 
         // found:
-        let (quo, _) = xn_over_d(v, f, 65536)?;
-        self.cur_val = nx_plus_y!(save_cur_val, v, quo);
+        match xn_over_d(v, f, 65536) {
+            Ok((quo, _)) => {
+                match mult_and_add(save_cur_val, v, quo, 0x3fff_ffff) {
+                    Ok(val) => self.cur_val = val,
+                    Err(_) => self.arith_error = true,
+                }
+            }
+            Err(_) => self.arith_error = true,
+        }
         Ok(true)
     }
 
@@ -814,11 +869,21 @@ impl Global {
             return Ok(true); // Goto done in section 453
         }
         else {
-            return Err(TeXError::IllegalUnitOfMeasurePt);
+            self.error(TeXError::IllegalUnitOfMeasurePt)?;
+            return Ok(false); // Goto attach_fraction
         };
 
         let rem: Scaled;
-        (self.cur_val, rem) = xn_over_d(self.cur_val, num, denom)?;
+        match xn_over_d(self.cur_val, num, denom) {
+            Ok((val, r)) => {
+                self.cur_val = val;
+                rem = r;
+            }
+            Err(_) => {
+                self.arith_error = true;
+                rem = 0;
+            }
+        }
         *f = (num * (*f) + 65536 * rem) / denom;
         self.cur_val += *f / 65536;
         *f %= 65536;
@@ -847,7 +912,7 @@ impl Global {
             self.scan_something_internal(level, negative)?;
             if self.cur_val_level >= GLUE_VAL {
                 if self.cur_val_level != (level as Integer) {
-                    return Err(TeXError::IncompatibleGlueUnits);
+                    self.error(TeXError::IncompatibleGlueUnits)?;
                 }
                 return Ok(());
             }
@@ -855,7 +920,7 @@ impl Global {
                 self.scan_dimen(mu, false, true)?;
             }
             else if level == (MU_VAL as QuarterWord) {
-                return Err(TeXError::IncompatibleGlueUnits);
+                self.error(TeXError::IncompatibleGlueUnits)?;
             }
         }
         else {
@@ -936,7 +1001,10 @@ impl Global {
                 equiv(m + self.cur_val)
             },
 
-            _ => return Err(TeXError::MissingFontIdentifier)
+            _ => {
+                self.back_error(TeXError::MissingFontIdentifier)?;
+                NULL_FONT
+            }
         };
         Ok(())
     }
@@ -983,11 +1051,9 @@ impl Global {
 
         // Section 579
         if self.cur_val == (self.fmem_ptr as Integer) {
-            Err(TeXError::FontHasOnly(f as QuarterWord))
+            self.error(TeXError::FontHasOnly(f as QuarterWord))?;
         }
-        else {
-            Ok(())
-        }
+        Ok(())
     }
 
     // Section 645

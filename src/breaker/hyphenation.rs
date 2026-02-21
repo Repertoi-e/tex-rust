@@ -81,14 +81,18 @@ impl Global {
             self.hn -= 1;
             // End section 930
 
-            if self.trie_char((self.cur_lang + 1) as usize) != self.cur_lang as QuarterWord {
+            // as usize first otherwise u8 overflow causes crash later
+            // @TODO @Cleanup dont bother with u8s?
+            if self.trie_char(self.cur_lang as usize + 1) != self.cur_lang as QuarterWord {
                 return Ok(())
             }
             self.hc[0] = 0;
             self.hc[(self.hn + 1) as usize] = 0;
             self.hc[(self.hn + 2) as usize] = 256;
             for j in 0..=(self.hn as Integer - self.r_hyf + 1) {
-                let mut z = self.trie_link((self.cur_lang + 1) as usize) + self.hc[j as usize] as HalfWord;
+                // as usize first otherwise u8 overflow causes crash later
+                // @TODO @Cleanup dont bother with u8s?
+                let mut z = self.trie_link(self.cur_lang as usize + 1) + self.hc[j as usize] as HalfWord;
                 let mut l = j;
                 while self.hc[l as usize] == self.trie_char(z as usize) {
                     if self.trie_op(z as usize) != MIN_QUARTERWORD {

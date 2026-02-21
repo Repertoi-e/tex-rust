@@ -345,7 +345,7 @@ impl Global {
                     // Section 195
                     self.print_esc("discretionary");
                     if replace_count(p) > 0 {
-                        self.print_esc(" replacing ");
+                        self.print(" replacing ");
                         self.print_int(replace_count(p) as Integer);
                     }
                     node_list_display!(self, pre_break(p));
@@ -462,7 +462,7 @@ impl Global {
                     self.print_glue(20000*UNITY, glue_order(p) as Integer, "");
                 }
                 else {
-                    self.print_glue(((UNITY as Real)*g).round() as Scaled, glue_order(p) as Integer, "");
+                    self.print_glue(((UNITY as Real)*(g as Real)).round() as Scaled, glue_order(p) as Integer, "");
                 }
             }
             // End section 186

@@ -477,12 +477,12 @@ impl Global {
                             if g_sign == STRETCHING {
                                 if stretch_order(self.g) == g_order {
                                     cur_glue += stretch(self.g) as Real;
-                                    cur_g = vet_glue!(glue_set(this_box) * cur_glue).round() as Scaled;
+                                    cur_g = vet_glue!((glue_set(this_box) as Real) * cur_glue).round() as Scaled;
                                 }
                             }
                             else if shrink_order(self.g) == g_order {
                                 cur_glue -= shrink(self.g) as Real;
-                                cur_g = vet_glue!(glue_set(this_box) * cur_glue).round() as Scaled;
+                                cur_g = vet_glue!((glue_set(this_box) as Real) * cur_glue).round() as Scaled;
                             }
                         }
                         self.rule_wd += cur_g;
@@ -691,12 +691,12 @@ impl Global {
                         if g_sign == STRETCHING {
                             if stretch_order(self.g) == g_order {
                                 cur_glue += stretch(self.g) as Real;
-                                cur_g = vet_glue!(glue_set(this_box) * cur_glue).round() as Scaled;
+                                cur_g = vet_glue!((glue_set(this_box) as Real) * cur_glue).round() as Scaled;
                             }
                         }
                         else if shrink_order(self.g) == g_order {
                             cur_glue -= shrink(self.g) as Real;
-                            cur_g = vet_glue!(glue_set(this_box) * cur_glue).round() as Scaled;
+                            cur_g = vet_glue!((glue_set(this_box) as Real) * cur_glue).round() as Scaled;
                         }
                     }
                     self.rule_ht += cur_g;
@@ -846,21 +846,32 @@ impl Global {
         
         // Section 640
         // Section 641
-        if height(p) > MAX_DIMEN
+        let goto_done = if height(p) > MAX_DIMEN
             || depth(p) > MAX_DIMEN
             || height(p) + depth(p) + v_offset() > MAX_DIMEN
             || width(p) + h_offset() > MAX_DIMEN
         {
-            return Err(TeXError::HugePage);
+            self.error(TeXError::HugePage)?;
+            if tracing_output() <= 0 {
+                self.begin_diagnostic();
+                self.print_nl("The following box has been deleted:");
+                self.show_box(p);
+                self.end_diagnostic(true);
+            }
+            true
         }
-        if height(p) + depth(p) + v_offset() > self.max_v {
-            self.max_v = height(p) + depth(p) + v_offset();
-        }
-        if width(p) + h_offset() > self.max_h {
-            self.max_h = width(p) + h_offset();
-        }
-        // End secction 641
+        else {
+            if height(p) + depth(p) + v_offset() > self.max_v {
+                self.max_v = height(p) + depth(p) + v_offset();
+            }
+            if width(p) + h_offset() > self.max_h {
+                self.max_h = width(p) + h_offset();
+            }
+            false
+        };
+        // End section 641
 
+        if !goto_done {
         // Section 532
         macro_rules! ensure_dvi_open {
             () => {
@@ -929,6 +940,7 @@ impl Global {
         self.total_pages += 1;
         self.cur_s = -1;
         // End section 640
+        } // end if !goto_done (done:)
 
         if tracing_output() <= 0 {
             self.print_char(b']');
@@ -1084,7 +1096,13 @@ impl Global {
         _ = self.scan_toks(false, true)?;
         self.get_token()?;
         if self.cur_tok != END_WRITE_TOKEN {
-            return Err(TeXError::UnbalancedWriteCmd);
+            self.error(TeXError::UnbalancedWriteCmd)?;
+            loop {
+                self.get_token()?;
+                if self.cur_tok == END_WRITE_TOKEN {
+                    break;
+                }
+            }
         }
         *self.mode_mut() = old_mode;
         self.end_token_list()?;

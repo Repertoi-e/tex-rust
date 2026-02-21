@@ -3,12 +3,12 @@ use crate::alignment::{
 };
 use crate::constants::*;
 use crate::datastructures::{
-    Status, cat_code, end_line_char, eq_type, equiv, info, link, pausing
+    Status, cat_code, end_line_char, eq_type, equiv, info, info_mut, link, link_mut, pausing
 };
 use crate::error::{TeXError, TeXResult};
 use crate::io::AlphaFileInSelector;
 use crate::{
-    Global, HalfWord, QuarterWord, StrNum, update_terminal
+    Global, HalfWord, QuarterWord, StrNum, back_list, ins_list, update_terminal
 };
 
 use std::io::Write;
@@ -16,6 +16,13 @@ use std::io::Write;
 // Part 24: Getting the next token
 
 // Section 352
+// tex.web: is_hex only matches 0-9 and lowercase a-f
+macro_rules! is_hex {
+    ($c:expr) => {
+        (($c >= b'0' && $c <= b'9') || ($c >= b'a' && $c <= b'f'))
+    };
+}
+
 macro_rules! hex_to_cur_chr {
     ($c:expr, $cc:expr, $cur_chr:expr) => {
         if $c <= b'9' {
@@ -54,16 +61,99 @@ impl Global {
     // Section 336
     fn check_outer_validity(&mut self) -> TeXResult<()> {
         if self.scanner_status != Status::Normal {
-            if self.scanner_status != Status::Skipping {
-                Err(TeXError::FileEndedOrForbiddenCSFound)
+            self.deletions_allowed = false;
+
+            // Section 337: Back up an outer control sequence so that it can be reread
+            if self.cur_cs != 0 {
+                if self.state() == TOKEN_LIST || self.name() < 1 || self.name() > 17 {
+                    let p = self.get_avail()?;
+                    *info_mut(p) = CS_TOKEN_FLAG + self.cur_cs;
+                    back_list!(self, p);
+                }
+                self.cur_cmd = SPACER;
+                self.cur_chr = b' ' as HalfWord;
+            }
+            // End section 337
+
+            if self.scanner_status > Status::Skipping {
+                // Section 338: Tell the user what has run away and try to recover
+                self.runaway();
+                if self.cur_cs == 0 {
+                    self.print_nl("! ");
+                    self.print("File ended");
+                }
+                else {
+                    self.cur_cs = 0;
+                    self.print_nl("! ");
+                    self.print("Forbidden control sequence found");
+                }
+                self.print(" while scanning ");
+                // Section 339
+                let p = self.get_avail()?;
+                match self.scanner_status {
+                    Status::Defining => {
+                        self.print("definition");
+                        *info_mut(p) = RIGHT_BRACE_TOKEN + b'}' as HalfWord;
+                    },
+                    Status::Matching => {
+                        self.print("use");
+                        *info_mut(p) = self.par_token;
+                        self.long_state = OUTER_CALL;
+                    },
+                    Status::Aligning => {
+                        self.print("preamble");
+                        *info_mut(p) = RIGHT_BRACE_TOKEN + b'}' as HalfWord;
+                        let q = p;
+                        let p2 = self.get_avail()?;
+                        *link_mut(p2) = q;
+                        *info_mut(p2) = CS_TOKEN_FLAG + FROZEN_CR;
+                        self.align_state = -1_000_000;
+                        ins_list!(self, p2);
+                        // We already did ins_list, so skip the one below
+                        self.print(" of ");
+                        self.sprint_cs(self.warning_index);
+                        self.error(TeXError::FileEndedOrForbiddenCSFound)?;
+                        self.deletions_allowed = true;
+                        return Ok(());
+                    },
+                    Status::Absorbing => {
+                        self.print("text");
+                        *info_mut(p) = RIGHT_BRACE_TOKEN + b'}' as HalfWord;
+                    },
+                    _ => (), // There are no other cases
+                }
+                // End section 339
+                ins_list!(self, p);
+                self.print(" of ");
+                self.sprint_cs(self.warning_index);
+                self.error(TeXError::FileEndedOrForbiddenCSFound)?;
+                // End section 338
             }
             else {
-                Err(TeXError::IncompleteIf)
+                // Section 336: IncompleteIf
+                self.print_nl("! ");
+                self.print("Incomplete ");
+                self.print_cmd_chr(IF_TEST, self.cur_if as HalfWord);
+                self.print("; all text was ignored after line ");
+                self.print_int(self.skip_line);
+                // In tex.web: if cur_cs<>0 then cur_cs:=0
+                // else help_line[2] changes to file-ended text.
+                // We need to check cur_cs BEFORE zeroing it.
+                let was_forbidden_cs = self.cur_cs != 0;
+                if self.cur_cs != 0 {
+                    self.cur_cs = 0;
+                }
+                self.cur_tok = CS_TOKEN_FLAG + FROZEN_FI;
+                if was_forbidden_cs {
+                    self.ins_error(TeXError::IncompleteIfForbidden)?;
+                } else {
+                    self.ins_error(TeXError::IncompleteIf)?;
+                }
             }
+
+            self.deletions_allowed = true;
         }
-        else {
-            Ok(())
-        }
+        Ok(())
     }
 
     // Section 341
@@ -81,6 +171,7 @@ impl Global {
                             match self.sec344_change_state_if_necessary()? {
                                 Goto::Switch => continue 'switch,
                                 Goto::Reswitch => continue 'reswitch,
+                                Goto::Restart => continue 'restart,
                                 _ => break 'switch,
                             }
                         }
@@ -156,7 +247,13 @@ impl Global {
 
             (_, SUP_MARK) => return Ok(self.sec352_if_this_sup_mark_starts()),
 
-            (_, INVALID_CHAR) => return Err(TeXError::InvalidCharacter), // Section 346
+            (_, INVALID_CHAR) => {
+                // Section 346
+                self.deletions_allowed = false;
+                self.error(TeXError::InvalidCharacter)?;
+                self.deletions_allowed = true;
+                return Ok(Goto::Restart);
+            },
 
             // Section 347
             (MID_LINE, SPACER) => {
@@ -237,9 +334,9 @@ impl Global {
             let c = self.buffer[(self.loc() + 1) as usize];
             if c < 128 {
                 *self.loc_mut() += 2;
-                if c.is_ascii_hexdigit() && self.loc() <= self.limit() {
+                if is_hex!(c) && self.loc() <= self.limit() {
                     let cc = self.buffer[self.loc() as usize];
-                    if cc.is_ascii_hexdigit() {
+                    if is_hex!(cc) {
                         *self.loc_mut() += 1;
                         hex_to_cur_chr!(c, cc, self.cur_chr);
                         return Goto::Reswitch;
@@ -295,9 +392,9 @@ impl Global {
                         let mut cc = 0u8;
                         if c < 128 {
                             let mut d = 2;
-                            if c.is_ascii_hexdigit() && k + 2 <= self.limit() {
+                            if is_hex!(c) && k + 2 <= self.limit() {
                                 cc = self.buffer[(k + 2) as usize];
-                                if cc.is_ascii_hexdigit() {
+                                if is_hex!(cc) {
                                     d += 1;
                                 }
                             }

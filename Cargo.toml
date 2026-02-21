@@ -10,5 +10,9 @@ license = "MIT"
 default = []
 debug = []
 stat = []
+trip = ["stat"]  # TRIP test configuration: reduced memory, specific error_line settings
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
 
 [workspace]

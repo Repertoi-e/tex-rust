@@ -13,7 +13,7 @@ use crate::datastructures::{
 };
 use crate::error::{TeXResult, TeXError};
 use crate::{
-    Global, HalfWord, Integer, QuarterWord, Real, Scaled, SmallNumber,
+    Global, GlueRatio, HalfWord, Integer, QuarterWord, Real, Scaled, SmallNumber,
     add_glue_ref, free_avail, hpack, is_running,
     sec406_get_next_nonblank_noncall_token, tail_append, vpack
 };
@@ -97,7 +97,8 @@ impl Global {
         if self.mode() == MMODE
             && (self.tail() != self.head() || self.incomplete_noad() != NULL)
         {
-            return Err(TeXError::ImproperHalignDisplay);
+            self.error(TeXError::ImproperHalignDisplay)?;
+            self.flush_math()?;
         }
         // End section 776
 
@@ -152,7 +153,8 @@ impl Global {
                         self.cur_loop = self.cur_align;
                     }
                     else {
-                        return Err(TeXError::MissingCroisillonAlign);
+                        self.back_error(TeXError::MissingCroisillonAlign)?;
+                        break 'sec783; // goto done1
                     }
                 }
                 else if self.cur_cmd != SPACER || p != HOLD_HEAD {
@@ -182,7 +184,8 @@ impl Global {
                     break 'sec784; // Goto done2
                 }
                 if self.cur_cmd == MAC_PARAM {
-                    return Err(TeXError::OnlyOneCroisillonAllowed);
+                    self.error(TeXError::OnlyOneCroisillonAllowed)?;
+                    continue; // restart loop, skip storing this token
                 }
                 *link_mut(p) = self.get_avail()?;
                 p = link(p);
@@ -376,7 +379,8 @@ impl Global {
                 // End section 793
             }
             else {
-                return Err(TeXError::ExtraAlignmentTab);
+                *extra_info_mut(self.cur_align) = CR_CODE;
+                self.error(TeXError::ExtraAlignmentTab)?;
             }
         }
         // End section 792
@@ -684,13 +688,13 @@ impl Global {
                             match glue_sign(p) {
                                 STRETCHING => {
                                     if stretch_order(v) == glue_order(p) {
-                                        t += (glue_set(p)*(stretch(v) as Real)).round() as Scaled;
+                                        t += ((glue_set(p) as Real)*(stretch(v) as Real)).round() as Scaled;
                                     }
                                 },
 
                                 SHRINKING => {
                                     if shrink_order(v) == glue_order(p) {
-                                        t -= (glue_set(p)*(shrink(v) as Real)).round() as Scaled;
+                                        t -= ((glue_set(p) as Real)*(shrink(v) as Real)).round() as Scaled;
                                     }
                                 },
 
@@ -728,7 +732,7 @@ impl Global {
                                         *glue_set_mut(r) = 0.0;
                                     }
                                     else {
-                                        *glue_set_mut(r) = ((t - width(r)) as Real) / (glue_stretch(r) as Real);
+                                        *glue_set_mut(r) = ((t - width(r)) as GlueRatio) / (glue_stretch(r) as GlueRatio);
                                     }
                                 },
 
@@ -742,7 +746,7 @@ impl Global {
                                         *glue_set_mut(r) = 1.0;
                                     }
                                     else {
-                                        *glue_set_mut(r) = ((width(r) - t) as Real) / (glue_shrink(r) as Real);
+                                        *glue_set_mut(r) = ((width(r) - t) as GlueRatio) / (glue_shrink(r) as GlueRatio);
                                     }
                                 },
                             }
@@ -768,7 +772,7 @@ impl Global {
                                         *glue_set_mut(r) = 0.0;
                                     }
                                     else {
-                                        *glue_set_mut(r) = ((t - height(r)) as Real) / (glue_stretch(r) as Real);
+                                        *glue_set_mut(r) = ((t - height(r)) as GlueRatio) / (glue_stretch(r) as GlueRatio);
                                     }
                                 },
 
@@ -782,7 +786,7 @@ impl Global {
                                         *glue_set_mut(r) = 1.0;
                                     }
                                     else {
-                                        *glue_set_mut(r) = ((height(r) - t) as Real) / (glue_shrink(r) as Real);
+                                        *glue_set_mut(r) = ((height(r) - t) as GlueRatio) / (glue_shrink(r) as GlueRatio);
                                     }
                                 },
                             }
@@ -846,15 +850,16 @@ impl Global {
             // Section 1206
             self.do_assignments()?;
             if self.cur_cmd != MATH_SHIFT {
-                return Err(TeXError::MissingDollarDollar);
+                self.back_error(TeXError::MissingDollarDollar)?;
             }
-
-            // Section 1197
-            self.get_x_token()?;
-            if self.cur_cmd != MATH_SHIFT {
-                return Err(TeXError::DisplayMathEndsWithDollars);
+            else {
+                // Section 1197
+                self.get_x_token()?;
+                if self.cur_cmd != MATH_SHIFT {
+                    self.back_error(TeXError::DisplayMathEndsWithDollars)?;
+                }
+                // End section 1197
             }
-            // End section 1197
 
             self.pop_nest();
             tail_append!(self, self.new_penalty(pre_display_penalty())?);

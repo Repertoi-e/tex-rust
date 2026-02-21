@@ -45,17 +45,16 @@ pub struct Global {
     pub(crate) first_count: Integer,
 
     // Section 73
-    // We only use two modes:
-    // - batch mode: no output on terminal
-    // - error_stop_mode: stops at first opportunity
-    // Any error stops the execution.
+    // Four modes: batch_mode, nonstop_mode, scroll_mode, error_stop_mode
     pub(crate) interaction: Integer,
 
     // Section 76
-    // `deletions_allowed` and `error_count` are not supported
-    // (`error_count` would stop at 1).
+    pub(crate) deletions_allowed: bool,
     pub(crate) set_box_allowed: bool,
     pub history: usize,
+    pub(crate) error_count: Integer,
+    pub(crate) use_err_help: bool,
+    pub(crate) long_help_seen: bool,
 
     // Section 96
     pub(crate) interrupt: bool,
@@ -354,6 +353,12 @@ pub struct Global {
     pub(crate) best_place: [HalfWord; 4],
     pub(crate) best_pl_line: [HalfWord; 4],
 
+    // Section 104
+    pub(crate) arith_error: bool,
+
+    // Section 825
+    pub(crate) no_shrink_error_yet: bool,
+
     // Section 839
     pub(crate) disc_width: Scaled,
 
@@ -526,7 +531,7 @@ impl Global {
             if self.log_opened {
                 wlog_ln!(" ");
                 wlog_ln!("Here is how much of TeX's memory you used:");
-                wlog_ln!(&format!(" {} string", str_ptr() - init_str_ptr()));
+                wlog!(&format!(" {} string", str_ptr() - init_str_ptr()));
                 if str_ptr() != init_str_ptr() + 1 {
                     wlog!("s");
                 }
@@ -545,7 +550,7 @@ impl Global {
                 }
                 wlog_ln!(&format!(" out of {}", HYPH_SIZE));
                 wlog_ln!(
-                    &format!(" {}i, {}n, {}p, {}b, {}s stack positions out of {}i, {}n, {}p, {}b, {}s",
+                    &format!(" {}i,{}n,{}p,{}b,{}s stack positions out of {}i,{}n,{}p,{}b,{}s",
                         self.max_in_stack,
                         self.max_nest_stack,
                         self.max_param_stack,

@@ -5,11 +5,11 @@ use crate::datastructures::{
     double_hyphen_demerits, emergency_stretch, ex_hyphen_penalty,
     final_hyphen_demerits, font, glue_ptr, glue_ptr_mut, glue_ref_count_mut,
     hang_after, hang_indent, hsize, hyphen_penalty, info, inter_line_penalty,
-    lc_code, leader_ptr, left_skip, lig_ptr, line_penalty, link, link_mut,
+    lc_code, leader_ptr, left_skip, left_skip_mut, lig_ptr, line_penalty, link, link_mut,
     llink, llink_mut, looseness, par_shape_ptr, penalty, penalty_mut,
     post_break, post_break_mut, pre_break, pre_break_mut, pretolerance, r#type,
-    replace_count, replace_count_mut, right_skip, rlink, rlink_mut,
-    shift_amount_mut, shrink, shrink_order, stretch, stretch_order, subtype,
+    replace_count, replace_count_mut, right_skip, right_skip_mut, rlink, rlink_mut,
+    shift_amount_mut, shrink, shrink_order, shrink_order_mut, stretch, stretch_order, subtype,
     subtype_mut, tolerance, type_mut, uc_hyph, width, width_mut
 };
 use crate::error::{TeXResult, TeXError};
@@ -115,8 +115,13 @@ impl Global {
         self.pop_nest();
 
         // Section 827
-        self.check_shrinkage(left_skip())?;
-        self.check_shrinkage(right_skip())?;
+        self.no_shrink_error_yet = true;
+        if shrink_order(left_skip()) != NORMAL && shrink(left_skip()) != 0 {
+            *left_skip_mut() = self.finite_shrink(left_skip())?;
+        }
+        if shrink_order(right_skip()) != NORMAL && shrink(right_skip()) != 0 {
+            *right_skip_mut() = self.finite_shrink(right_skip())?;
+        }
         let mut q = left_skip();
         let mut r = right_skip();
         self.background[1] = width(q) + width(r);
@@ -466,19 +471,24 @@ fn serial_mut(p: HalfWord) -> &'static mut HalfWord {
 }
 
 impl Global {
-    // Section 825
-    fn check_shrinkage(&mut self, p: HalfWord) -> TeXResult<()> {
-        if shrink_order(p) != NORMAL && shrink(p) != 0 {
-            // Section 826
+    // Section 826: finite_shrink — recovers from infinite shrinkage
+    fn finite_shrink(&mut self, p: HalfWord) -> TeXResult<HalfWord> {
+        if self.no_shrink_error_yet {
+            self.no_shrink_error_yet = false;
             #[cfg(feature = "stat")]
             if tracing_paragraphs() > 0 {
                 self.end_diagnostic(true);
             }
-            Err(TeXError::InfiniteGlueShrinkageInParagraph)
+            self.error(TeXError::InfiniteGlueShrinkageInParagraph)?;
+            #[cfg(feature = "stat")]
+            if tracing_paragraphs() > 0 {
+                self.begin_diagnostic();
+            }
         }
-        else {
-            Ok(())
-        }
+        let q = self.new_spec(p)?;
+        *shrink_order_mut(q) = NORMAL;
+        self.delete_glue_ref(p);
+        Ok(q)
     }
 
     // Section 829
@@ -1090,7 +1100,9 @@ impl Global {
                 {
                     self.try_break(0, UNHYPHENATED)?;
                 }
-                self.check_shrinkage(glue_ptr(self.cur_p))?;
+                if shrink_order(glue_ptr(self.cur_p)) != NORMAL && shrink(glue_ptr(self.cur_p)) != 0 {
+                    *glue_ptr_mut(self.cur_p) = self.finite_shrink(glue_ptr(self.cur_p))?;
+                }
                 let q = glue_ptr(self.cur_p);
                 act_width!() += width(q);
                 self.active_width[2 + stretch_order(q) as usize] += stretch(q);
