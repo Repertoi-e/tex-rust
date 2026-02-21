@@ -10,3 +10,5 @@ license = "MIT"
 default = []
 debug = []
 stat = []
+
+[workspace]
